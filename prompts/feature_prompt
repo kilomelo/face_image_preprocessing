@@ -9,7 +9,338 @@
 你编写这段代码的最终目的（需求）是：
 
 [[[
-[原始总需求]
+输入一个目录，给目录中所有的图像文件去重。使用两种判断图像重复的算法：哈希值比较法和ORB特征距离法。
+使用面向对象的方式编码。有如下对象：
+1、相似图像组，由至少两张图片组成。
+2、描述，由一个已被判明是唯一图像的列表和一个相似图像组对象的列表组成。
+3、重复图像判断器，这个判断器可能是ORB特征判断器也可能是哈希值判断器。每个判断器有其属性来定义不同算法需要的阈值或精度。
+比如哈希判断器有哈希精度的属性，如果是8，则图像转换为哈希值时会以8*8的大小计算。又比如ORB特征判断器有阈值属性，有生成ORB特征点数量属性。
+可以传入一组图片给判断器，判断器会输出一个描述对象，表示这个判断器认为哪些图像是唯一的，哪些图像是相似的。
+
+算法大致如下：
+1、创建判断器对象列表，列表中首先包含N个哈希判断器对象，他们的精度从8开始以2的倍数递增，第一个是8，第二个是16，以此类推。列表中还包含N个ORB判断器，阈值、生成特征点数量依次提高，即他们对重复图像的判断越来越严格。
+2、创建出目录的描述对象，此时应该所有图片都在一个相似图像组里，唯一图像列表为空。
+3、循环，直至应用完所有的判断器。对于每一次循环做如下操作：
+    【缩进1】取得当前判断器对象。
+    【缩进1】遍历目录描述对象的相似图像列表，每一项做如下操作：
+        【缩进2】对相似图像组的每个元素应用当前判断器，即传入相似图像组的所有图片给判断器进行是否重复的判断。输出的描述对象存入一个临时描述对象列表。
+        【缩进2】将此相似图像组列表项从目录描述对象的相似图片组列表中删除。
+    【缩进1】把临时描述对象列表的所有项与目录的描述对象合并，合并规则是：唯一图像列表合并，相似图像组列表合并。合并后输出目录描述对象中唯一图像列表的长度。
+    【缩进1】当前判断器标记为已应用。
+4、经过上面的循环，得到了一个最终的目录的描述对象，这个对象应该可以表示该目录下哪些图片是唯一的，哪些图片是互相重复的。输出这个描述对象。
+
+哈希判断算法，可以参考这段代码：
+【【【
+from PIL import Image
+from pathlib import Path
+import numpy as np
+import cv2
+import os
+from imagehash import phash
+import datetime
+from tqdm.notebook import tqdm
+
+def process_images(directory, log_file_path, sample_precision):
+    """
+    处理图像文件，计算哈希值并筛选出唯一的图像文件路径列表。
+
+    参数：
+        directory (str): 包含图像文件的目录路径。
+        log_file_path (str): 日志文件的路径。
+        sample_precision (int): 图片采样精度，即图片缩放尺寸。
+
+    返回：
+        tuple: 哈希字典、唯一图像文件路径列表和处理失败的文件列表。
+    """
+    # 初始化变量
+    hashes = {}
+    unique_images = []
+    failed_files = []
+    
+    # 获取目录中的所有文件列表
+    directory_path = Path(directory)
+    total_files = sum(1 for item in directory_path.iterdir() if item.is_file())
+
+    # 记录日志：开始处理图像文件
+    print("开始计算哈希，总文件数：{}".format(total_files))
+    log2file(log_file_path, "总文件数：{}".format(total_files))
+    files = directory_path.glob("*")
+
+    # 遍历目录中的文件
+    for file_path in tqdm(files, total=total_files, desc='Processing'):
+        # 判断文件类型，仅处理jpg和png文件
+        if not file_path.suffix.lower() in (".jpg", ".png"):
+            continue
+        try:
+            with open(file_path, 'rb') as f:
+                img_bytes = np.fromfile(f, dtype=np.uint8)
+                img = cv2.imdecode(img_bytes, cv2.IMREAD_GRAYSCALE)
+                
+            if img is None:
+                err_info = "警告: 无法读取图像 {}, 跳过.".format(file_path)
+                print(err_info)
+                failed_files.append(err_info)
+                continue
+            
+            img_pil = Image.open(file_path)
+            img_size = img_pil.size
+            
+            img_pil_gray = Image.fromarray(img)
+            img_hash = phash(img_pil_gray.resize((sample_precision, sample_precision)))
+            
+            if img_hash not in hashes:
+                hashes[img_hash] = {"paths": [], "sizes": []}
+            hashes[img_hash]["paths"].append(file_path)
+            hashes[img_hash]["sizes"].append(img_size)
+            
+            unique_images.append(file_path)
+        except Exception as e:
+            # 记录处理失败的文件及错误信息
+            err_info = "错误: 处理 {} 时出错: {}".format(file_path, e)
+            print(err_info)
+            failed_files.append(err_info)
+        
+    # 返回哈希字典、唯一图像文件路径列表和处理失败的文件列表
+    return hashes, unique_images, failed_files
+
+
+def remove_duplicate_images(directory, remove_from_disk=False, sample_precision=8):
+    """
+    删除重复的图像文件。
+
+    参数：
+        directory (str): 包含图像文件的目录路径。
+        remove_from_disk (bool): 是否从磁盘中删除重复文件，默认为 False。
+        sample_precision (int): 图片采样精度，即图片缩放尺寸。
+
+    返回：
+        list: 唯一图像文件路径列表。
+    """
+    # 获取当前工作目录
+    current_dir = os.getcwd()
+    # 定义日志文件路径
+    log_file_path = os.path.join(current_dir, "log_{}.txt".format(datetime.datetime.now().strftime("%Y%m%d%H%M%S")))
+
+    info = "开始处理图片去重，目录：{directory}，是否删除重复文件：{remove_from_disk}".format(directory=directory, remove_from_disk=remove_from_disk)
+    print(info)
+    log2file(log_file_path, info)
+
+    # 检查目录是否存在
+    if not os.path.isdir(directory):
+        err_info = "错误: 目录 {} 不存在。".format(directory)
+        print(err_info)
+        if log_file_path:  # 确保log_file_path已被定义
+            log2file(log_file_path, err_info)
+        return []
+
+    # 获取目录中的文件列表
+    files = os.listdir(directory)
+    
+    # 检查目录是否为空或没有图片文件
+    if not files or all(not f.lower().endswith(('.jpg', '.png')) for f in files):
+        err_info = "警告: 目录 {} 是空的或不包含任何图片文件。".format(directory)
+        print(err_info)
+        if log_file_path:
+            log2file(log_file_path, err_info)
+        return []
+
+    # 调用处理图像文件的函数，并传递采样精度参数
+    hashes, unique_images, failed_files = process_images(directory, log_file_path, sample_precision)
+    error_files = []  # 用于记录删除重复文件时出现的错误的文件
+    
+    # 初始化重复组计数器
+    duplicate_group_count = 0
+    
+    # 遍历哈希字典
+    for hash_value, data in hashes.items():
+        # 如果有重复的图像
+        if len(data["paths"]) > 1:  
+            duplicate_group_count += 1
+            info ="第 {} 组重复图片，共 {} 张，哈希值: {}".format(duplicate_group_count, len(data['paths']), hash_value)
+            print(info)
+            log2file(log_file_path, info)
+            
+            # 找到尺寸最大的图像文件
+            max_size_index = data["sizes"].index(max(data["sizes"], key=lambda x: x[0]*x[1]))
+            largest_img_path, largest_img_size = data["paths"][max_size_index], data["sizes"][max_size_index]
+            info = "{} w:{} h:{} - 保留（尺寸最大）".format(largest_img_path, largest_img_size[0], largest_img_size[1])
+            print(info)
+            log2file(log_file_path, info)
+            
+            # 遍历除尺寸最大的图像文件外的其他文件
+            for idx, (path, size) in enumerate(zip(data["paths"], data["sizes"]), start=1):
+                if idx != max_size_index + 1:
+                    info = "{} w:{} h:{} - 标记删除".format(path, size[0], size[1])
+                    print(info)
+                    log2file(log_file_path, info)
+                    unique_images.remove(path)
+                    if not remove_from_disk: continue
+                    try:
+                        os.remove(path)
+                    except Exception as e:
+                        # 记录删除文件时出现的错误
+                        err_info = "错误: 删除文件 {} 时出错: {}".format(path, e)
+                        print(err_info)
+                        error_files.append(err_info)
+
+    info = "总重复组数：{}".format(duplicate_group_count)
+    print(info)
+    log2file(log_file_path, info)
+
+    info = "去重后数量: {}".format(len(unique_images))
+    print(info)
+    log2file(log_file_path, info)
+    
+    # 如果存在处理失败或删除文件错误，记录到日志文件中
+    if failed_files or error_files:
+        print("\n总共失败或异常文件数:", len(failed_files) + len(error_files))
+        for error_info in failed_files + error_files:
+            print(error_info)
+            log2file(log_file_path, error_info)
+    else:
+        print("\n所有文件均已成功处理，无任何失败或异常情况。")
+    print("详细信息见 {}".format(log_file_path))
+    
+    # 返回唯一图像文件路径列表
+    return unique_images
+
+
+def log2file(log_file_path, message):
+    """
+    记录消息到日志文件。
+
+    参数：
+        log_file_path (str): 日志文件的路径。
+        message (str): 要记录的消息。
+    """
+    # 如果文件不存在，就创建一个新文件
+    if not os.path.exists(log_file_path):
+        with open(log_file_path, "w"):
+            pass
+    # 追加写入错误信息到文件
+    with open(log_file_path, "a") as f:
+        f.write(message + "\n")
+】】】
+
+ORB特征算法，可以参考这段代码：
+【【【
+def detect_orb_keypoints(image_path, nfeatures):
+    """
+    使用ORB检测器提取图像的特征点。
+    
+    参数:
+    - image_path: 图像文件路径
+    
+    返回:
+    - keypoints: 关键点列表
+    - descriptors: 描述符列表
+    """
+    orb = cv2.ORB_create(nfeatures)
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    kp, des = orb.detectAndCompute(img, None)
+    return kp, des
+
+def match_descriptors(des1, des2):
+    """
+    使用BFMatcher匹配描述符。
+    
+    参数:
+    - des1, des2: 描述符列表
+    
+    返回:
+    - matches: 匹配结果
+    """
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    matches = bf.match(des1, des2)
+    return matches
+
+def print_matches(matches):
+    # 设置每行的字符宽度和每列的匹配数目
+    width = 120  # 每行的字符宽度
+    matches_per_row = 10  # 每列的匹配数目
+
+    # 打印匹配的距离，以矩阵形式显示
+    print("Matches:")
+    # 计算需要打印的行数和行号的宽度
+    rows = (len(matches) - 1) // matches_per_row + 1
+    row_numbers = list(range(1, rows + 1))
+    line_width = len(str(len(matches) // matches_per_row + 1))  # 行号的最大位数
+
+    # 确定距离数值的格式化字符串，确保等宽显示
+    max_distance = max(matches, key=lambda x: x.distance).distance
+    distance_width = len(f"{max_distance:.4f}")  # 距离数值的最大位数
+
+    # 计算每行的格式化字符串
+    formatted_rows = []
+    for i in range(rows):
+        # 计算当前行的起始和结束索引
+        start_index = i * matches_per_row
+        end_index = start_index + matches_per_row
+        # 获取当前行的匹配项
+        row_matches = matches[start_index:end_index]
+        # 创建一个格式化的字符串列表，每个匹配项后面都有足够的空格
+        formatted_distances = [f"{match.distance:>{distance_width}.2f}" for match in row_matches]
+        # 构建行号格式化字符串
+        line_number = f"[{str(i + 1).zfill(line_width)}]"
+        # 将行号和匹配距离连接成一个字符串，并添加到列表中
+        formatted_rows.append(f"{line_number} {' '.join(formatted_distances)}")
+
+    # 打印每行格式化后的字符串
+    for row in formatted_rows:
+        print(row.ljust(width))
+
+    # 如果需要，也可以将这些信息保存到日志文件中
+    log_file_path = 'matches_log.txt'
+    with open(log_file_path, 'w') as log_file:
+        log_file.write("Matches (first N shown):\n")
+        for row in formatted_rows:
+            log_file.write(f"{row}\n")
+
+def compare_images_by_orb_features(image1_path, image2_path, log_detail=False):
+    """
+    比较两张图像的ORB特征，判断是否相似，并增加详细日志输出辅助问题判断。
+    修正逻辑：若总匹配数达到原图特征点数的90%，则视作相似。
+    """
+
+    nfeatures = 500
+    num_threshold = 0.7
+
+
+    if log_detail: print(f"Comparing images by ORB features\nimg1: {image1_path}\nimg2: {image2_path}")
+    match_details = {}
+    
+    kp1, des1 = detect_orb_keypoints(image1_path, nfeatures)
+    kp2, des2 = detect_orb_keypoints(image2_path, nfeatures)
+    
+    # 新增日志：检测到的关键点数量
+    match_details["keypoints_image1"] = len(kp1)
+    match_details["keypoints_image2"] = len(kp2)
+    if log_detail: print(f"KeyPoints Count: img1 -> {match_details['keypoints_image1']}, img2 -> {match_details['keypoints_image2']}")
+
+    # 检查是否成功检测到特征点
+    if des1 is None or des2 is None:
+        if log_detail: print(f"No keypoints detected")
+        match_details["status"] = "No keypoints"
+        return False
+    
+    matches = match_descriptors(des1, des2)
+        
+    # 输出匹配数量
+    total_matches = len(matches)
+    if log_detail: print(f"Total matches between img1 and img2: {total_matches}")
+    
+    if total_matches == 0:  
+        if log_detail: print(f"No matches found between img1 and img2")
+        match_details["status"] = "No matches"
+        return False
+
+    if total_matches > nfeatures * num_threshold:
+        if log_detail: print(f"img1 and img2 are similar.")
+        return True
+    else:
+        if log_detail: print(f"img1 and img2 are different.")
+        return False
+】】】
 ]]]
 
 给我展示你编写的最终代码，这段代码应当是完整可运行的。
