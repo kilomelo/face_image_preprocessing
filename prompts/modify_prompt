@@ -1,0 +1,110 @@
+你将扮演一位经验丰富的软件工程师。
+你的代码质量很高，可读性强，易于维护，遵循了良好的代码规范，有详细的注释（主要以中文书写）。
+你的代码有很高的鲁棒性，充分考虑到了可能遇到的各种异常情况并对每种情况都做了处理，包括但不限于空指针、数组越界、类型转换错误、IO异常等。
+你的代码在性能方面也有良好的表现，能够高效地处理大量数据。
+你的代码在各个关键步骤上都有日志输出，以便在出现问题时能够快速定位问题。
+
+你将根据我提供的代码和新的需求，编写一段代码，并确保这段代码符合上述要求。
+
+你编写这段代码的最终目的是：
+
+[[[
+给定一个目录，递归将目录下所有图片文件移动到该目录，并重命名。命名规则为：英文字母表示的26进制名称，例如找到的第一个文件改名为a，第二个文件改名为b，第26个文件改名为z，第27个文件改名为aa，第28个文件改名为ab，依此类推。
+以python编写，代码会运行在vscode的jupyter notebook编辑器中。
+]]]
+
+你会在以下代码（基础代码）的基础上做修改来实现新的需求：
+
+[[[
+import os
+import shutil
+from pathlib import Path
+
+def decimal_to_base26(n):
+    """将十进制数字转换为26进制字母表示"""
+    result = ""
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        result = chr(remainder + ord('a')) + result
+    return result
+
+def move_and_rename_images(directory):
+    """
+    递归遍历指定目录，将所有图片文件移动到该目录并重命名。
+    完成后，根据成功处理的文件记录，删除非图片文件和未成功处理的图片及空目录。
+    
+    图片文件被重命名为基于26进制的字母组合，如'a', 'b', ..., 'z', 'aa', 'ab', ...
+    
+    参数:
+    directory (str or Path): 目标目录路径
+    """
+    counter = 0  # 初始化计数器
+    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']  # 可以根据需要添加其他图片扩展名
+    successful_files = set()  # 记录成功处理的文件名
+    
+    # 确保目录存在
+    target_dir = Path(directory)
+    if not target_dir.is_dir():
+        print(f"目录不存在: {directory}")
+        return
+    
+    # 移动并重命名图片，同时记录成功处理的文件
+    for root, dirs, files in os.walk(directory, topdown=False):
+        for name in files:
+            # 检查文件是否为图片
+            if any(name.lower().endswith(ext) for ext in image_extensions):
+                # 在使用前先增加counter的值，确保首次调用时有有效名字
+                counter += 1
+                source_path = Path(root) / name
+                new_name = decimal_to_base26(counter)
+                target_path = target_dir / f"{new_name}.jpg"  # 假设重命名后的文件统一为.jpg格式
+                
+                try:
+                    shutil.move(str(source_path), str(target_path))
+                    print(f"移动并重命名: {source_path} -> {target_path}")
+                    successful_files.add(new_name + ".jpg")  # 记录成功重命名的文件
+                except Exception as e:
+                    print(f"处理文件{source_path}时发生错误: {e}")
+    
+    # 清理非图片文件、未成功处理的图片文件和空目录
+    def clean_non_image_or_unprocessed_files_and_dirs(path, successful_files_set):
+        for item in path.iterdir():
+            if item.is_file():
+                if item.suffix.lower() not in image_extensions or item.name not in successful_files_set:
+                    try:
+                        item.unlink()
+                        print(f"删除文件: {item}")
+                    except Exception as e:
+                        print(f"删除文件{item}时发生错误: {e}")
+            elif item.is_dir():
+                clean_non_image_or_unprocessed_files_and_dirs(item, successful_files_set)  # 递归清理子目录
+                try:
+                    if not any(item.iterdir()):  # 如果是空目录，则删除
+                        item.rmdir()
+                        print(f"删除空目录: {item}")
+                except Exception as e:
+                    print(f"删除空目录{item}时发生错误: {e}")
+                    
+    clean_non_image_or_unprocessed_files_and_dirs(target_dir, successful_files)
+
+if __name__ == "__main__":
+    # 示例：请替换为实际需要处理的目录路径
+    target_directory = "/Users/chenweichu/dev/data/test9"
+    print("开始处理...")
+    move_and_rename_images(target_directory)
+    print("处理完成.")
+]]]
+
+新的需求是：
+
+[[[
+将成功操作的文件都记录到一个文本文件中（操作记录），包括移动和重命名之前该文件的路径和移动重命名之后该文件的路径。这个文本文件保存在输入目录中，如果创建前存在则覆盖。
+操作记录是用来做逆转操作的。你还需要增加一个逆转操作方法，这个方法传入目录路径，功能是根据目录中找到的操作记录文本文件的内容，把经过移动重命名的文件都还原到原来的路径和文件名。
+]]]
+
+你只需要在上面代码的基础上做尽量少的修改来解决问题，对于可以不用修改的部分不进行修改。
+不要试图删除基础代码中的注释和用于调试的日志输出，除非这是必要的。
+最后，给我展示修改后用于替换基础代码的完整代码（最终代码），包括修改了的部分和未修改的部分。
+给我的最终代码应当是完整可运行的。
+最终代码不应该包含任何省略或指向性注释。
+不应该包含类似于“...省略实现”、“...保持不变”、“与...相同”这样的注释来代替实际代码。
