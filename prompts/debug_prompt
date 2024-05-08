@@ -7,17 +7,25 @@
 你正在编写代码以达到这个目的：
 
 [[[
-参考这个方法，编写另一个与之类似的方法，但输出是字母与数字共同编码。注意，并不是0-9这十个数字和所有的26个字母都参与编码，因为有些数字与字母在外观上接近导致容易被辨识错误，需要剔除掉那些容易辨识错误的字母和数字。
-然后编写一个测试方法用以测试你的代码，注意测试用例需要充分考虑到边缘情况。
+输入一个目录，给目录中所有的图像文件去重。使用两种判断图像重复的算法：哈希值比较法和ORB特征距离法。
+使用面向对象的方式编码。有如下对象：
+1、相似图像组，由至少两张图片组成。
+2、描述，由一个已被判明是唯一图像的列表和一个相似图像组对象的列表组成。
+3、重复图像判断器，这个判断器可能是ORB特征判断器也可能是哈希值判断器。每个判断器有其属性来定义不同算法需要的阈值或精度。
+比如哈希判断器有哈希精度的属性，如果是8，则图像转换为哈希值时会以8*8的大小计算。又比如ORB特征判断器有阈值属性，有生成ORB特征点数量属性。
+可以传入一组图片给判断器，判断器会输出一个描述对象，表示这个判断器认为哪些图像是唯一的，哪些图像是相似的。
 
-参考的代码：
-def decimal_to_base26(n):
-"""将十进制数字转换为26进制字母表示"""
-result = ""
-while n > 0:
-n, remainder = divmod(n - 1, 26)
-result = chr(remainder + ord('a')) + result
-return result
+算法大致如下：
+1、创建判断器对象列表，列表中首先包含N个哈希判断器对象，他们的精度从8开始以2的倍数递增，第一个是8，第二个是16，以此类推。列表中还包含N个ORB判断器，阈值、生成特征点数量依次提高，即他们对重复图像的判断越来越严格。
+2、创建出目录的描述对象，此时应该所有图片都在一个相似图像组里，唯一图像列表为空。
+3、循环，直至应用完所有的判断器。对于每一次循环做如下操作：
+    【缩进1】取得当前判断器对象。
+    【缩进1】遍历目录描述对象的相似图像列表，每一项做如下操作：
+        【缩进2】对相似图像组的每个元素应用当前判断器，即传入相似图像组的所有图片给判断器进行是否重复的判断。输出的描述对象存入一个临时描述对象列表。
+        【缩进2】将此相似图像组列表项从目录描述对象的相似图片组列表中删除。
+    【缩进1】把临时描述对象列表的所有项与目录的描述对象合并，合并规则是：唯一图像列表合并，相似图像组列表合并。合并后输出目录描述对象中唯一图像列表的长度。
+    【缩进1】当前判断器标记为已应用。
+4、经过上面的循环，得到了一个最终的目录的描述对象，这个对象应该可以表示该目录下哪些图片是唯一的，哪些图片是互相重复的。输出这个描述对象。
 ]]]
 
 你刚刚编写的代码运行似乎出现了一些问题，找出并修复它。
@@ -25,54 +33,258 @@ return result
 运行的代码（基础代码）是：
 
 [[[
-def decimal_to_mixed_base22(n):
-    """将十进制数字转换为22进制字母数字混合表示，排除了易混淆的字符'I', 'O', 'l', '1'"""
-    allowed_chars = "0123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz"
-    result = ""
-    while n > 0:
-        n, remainder = divmod(n, 22)
-        result = allowed_chars[remainder] + result
-    return result
+from PIL import Image
+import numpy as np
+import cv2
+import os
+from pathlib import Path
+from imagehash import phash
+from itertools import combinations
+from typing import List, Set, Tuple
+from termcolor import colored
 
-def test_decimal_to_mixed_base22():
-    print("测试正常数值:")
-    print(f"0 -> {decimal_to_mixed_base22(0)}")  # 应当输出 "0"
-    print(f"21 -> {decimal_to_mixed_base22(21)}")  # 应当输出 "T"
-    print(f"22 -> {decimal_to_mixed_base22(22)}")  # 应当输出 "10"
-    print(f"45 -> {decimal_to_mixed_base22(45)}")  # 应当输出 "21"
-    
-    print("\n测试大数值:")
-    print(f"1000 -> {decimal_to_mixed_base22(1000)}")  # 应当输出 "1F6"
-    print(f"2222 -> {decimal_to_mixed_base22(2222)}")  # 用于检验边界处理，实际输出会是22进制表示
-    
-    print("\n测试边缘情况:")
-    try:
-        print(f"-1 -> {decimal_to_mixed_base22(-1)}")  # 应当不抛出异常，但需考虑如何处理负数
-    except ValueError as e:
-        print(f"处理负数时捕获到的错误: {e}")
-    
-    print("测试完成。")
+class ImageDescriptor:
+    def __init__(self, unique_images: Set[Path], similar_groups: List[List[Path]]):
+        self.unique_images = unique_images
+        self.similar_groups = similar_groups
 
-# 运行测试
-test_decimal_to_mixed_base22()
+class HashDetector:
+    def __init__(self, precision: int):
+        self.precision = precision
+
+    def detect(self, images: List[Path]) -> ImageDescriptor:
+        print(f"Detecting duplicates using perceptual hash, precision: {self.precision}\nimages cnt: {len(images)}")
+        hash_dict = {}
+        for image_path in images:
+            with Image.open(image_path) as img:
+                img_hash = phash(img.convert("L").resize((self.precision, self.precision)))
+                if img_hash in hash_dict:
+                    hash_dict[img_hash].append(image_path)
+                else:
+                    hash_dict[img_hash] = [image_path]
+        print(f"Found {len(hash_dict)} unique hashes")
+        unique_images = set()
+        similar_groups = []
+        for paths in hash_dict.values():
+            if len(paths) == 1:
+                unique_images.add(paths[0])
+            else:
+                similar_groups.append(paths)
+        print(f"Found {len(unique_images)} unique images, {len(similar_groups)} similar groups")
+        return ImageDescriptor(unique_images, similar_groups)
+
+class ORBDetector:
+    def __init__(self, nfeatures: int, threshold: float):
+        self.nfeatures = nfeatures
+        self.threshold = threshold
+
+    def detect(self, images: List[Path]) -> ImageDescriptor:
+        keypoints_dict = {img: self._extract_features(img) for img in images}
+        similar_groups = []
+        unique_images = set(images)
+        
+        for img1, img2 in combinations(images, 2):
+            kp1, des1 = keypoints_dict[img1]
+            kp2, des2 = keypoints_dict[img2]
+            if des1 is not None and des2 is not None:
+                if self._match_features(des1, des2) > self.nfeatures * self.threshold:
+                    similar_groups.append([img1, img2])
+                    unique_images.remove(img1)
+                    unique_images.remove(img2)
+
+        return ImageDescriptor(unique_images, similar_groups)
+
+    def _extract_features(self, image_path: Path):
+        orb = cv2.ORB_create(self.nfeatures)
+        img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+        return orb.detectAndCompute(img, None)
+
+    def _match_features(self, des1, des2):
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = bf.match(des1, des2)
+        return len(matches)
+
+class ImageDeduplicator:
+    def __init__(self, directory: str):
+        self.directory = directory
+        self.detectors = [
+            HashDetector(8), # HashDetector(16),
+            ORBDetector(500, 0.7), ORBDetector(1000, 0.8)
+        ]
+
+    def deduplicate(self):
+        images = [path for path in Path(self.directory).glob("*") if path.suffix.lower() in [".jpg", ".png"]]
+        descriptor = ImageDescriptor(set(), [images])
+
+        for detector in self.detectors:
+            print(colored(f"Processed with {type(detector).__name__}[{id(detector)}], similar_groups count: {len(descriptor.similar_groups)}", "yellow"))
+            new_descriptor = ImageDescriptor(descriptor.unique_images, [])
+            for group in descriptor.similar_groups:
+                print(f"Processing group of size {len(group)}")
+                result = detector.detect(group)
+                new_descriptor.unique_images |= result.unique_images
+                new_descriptor.similar_groups.extend(result.similar_groups)
+            descriptor = new_descriptor
+            print(colored(f"unique count: {len(descriptor.unique_images)}", "yellow"))
+        
+        return descriptor
+
+# Example usage
+deduplicator = ImageDeduplicator("/Users/chenweichu/dev/data/test")
+final_descriptor = deduplicator.deduplicate()
+print(f"Final unique images count: {len(final_descriptor.unique_images)}")
+
 ]]]
+
 
 输出是：
 
 [[[
-测试正常数值:
-0 -> 
-21 -> M
-22 -> 10
-45 -> 21
+Processed with HashDetector[6305821456], similar_groups count: 1
+Processing group of size 86
+Detecting duplicates using perceptual hash, precision: 8
+images cnt: 86
+Found 51 unique hashes
+Found 29 unique images, 22 similar groups
+unique count: 29
+Processed with HashDetector[6305823184], similar_groups count: 22
+Processing group of size 3
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 3
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 7
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 7
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 3
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 3
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 3
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 3
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 3
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 3
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 3
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 3
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 3
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 3
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 3
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 3
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 3
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 3
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 1 unique hashes
+Found 0 unique images, 1 similar groups
+Processing group of size 2
+Detecting duplicates using perceptual hash, precision: 64
+images cnt: 2
+Found 2 unique hashes
+Found 2 unique images, 0 similar groups
+unique count: 31
+Processed with ORBDetector[6305822080], similar_groups count: 21
+Processing group of size 3
 
-测试大数值:
-1000 -> 21A
-2222 -> 4D0
+---------------------------------------------------------------------------
+KeyError                                  Traceback (most recent call last)
+Cell In[19], line 99
+     97 # Example usage
+     98 deduplicator = ImageDeduplicator("/Users/chenweichu/dev/data/test")
+---> 99 final_descriptor = deduplicator.deduplicate()
+    100 print(f"Final unique images count: {len(final_descriptor.unique_images)}")
 
-测试边缘情况:
--1 -> 
-测试完成。
+Cell In[19], line 89
+     87 for group in descriptor.similar_groups:
+     88     print(f"Processing group of size {len(group)}")
+---> 89     result = detector.detect(group)
+     90     new_descriptor.unique_images |= result.unique_images
+     91     new_descriptor.similar_groups.extend(result.similar_groups)
+
+Cell In[19], line 57
+     55         if self._match_features(des1, des2) > self.nfeatures * self.threshold:
+     56             similar_groups.append([img1, img2])
+---> 57             unique_images.remove(img1)
+     58             unique_images.remove(img2)
+     60 return ImageDescriptor(unique_images, similar_groups)
+
+KeyError: PosixPath('/Users/chenweichu/dev/data/test/k.jpg')
 ]]]
 
 请根据输出仔细思考，为什么输出没有符合预期，上面那段代码中为什么会出现问题，试着从逻辑上分析并给出可能的原因。

@@ -1,0 +1,235 @@
+你将扮演一位经验丰富的软件工程师。
+你的代码质量很高，可读性强，易于维护，遵循了良好的代码规范，有详细的注释（主要以中文书写）。
+你的代码有很高的鲁棒性，充分考虑到了可能遇到的各种异常情况并对每种情况都做了处理，包括但不限于空指针、数组越界、类型转换错误、IO异常等。
+你的代码在性能方面也有良好的表现，能够高效地处理大量数据。
+你的代码在各个关键步骤上都有日志输出，以便在出现问题时能够快速定位问题。
+
+你将根据我提供的代码和新的需求，编写一段代码，并确保这段代码符合上述要求。
+
+你编写这段代码的最终目的是：
+
+[[[
+编写一个带图形界面的工具，这个工具可以列出一个文件夹下的所有文本文件，并且可以选择一个文本文件查看其内容。
+工具界面布局如下：
+首先是上下布局，上部是一个目录输入框，下部是一个左右结构的子布局。
+目录输入框右侧有个按钮可以选择打开哪个目录，当前打开的目录路径会在目录输入框里显示。
+下部的左右结构如下：
+左边是当前打开的目录中所有文本文件的列表，以文件名为条目显示，条目按文件的创建时间排序，条目可以点击选择当前选中条目，当前选中条目会高亮。刚打开一个新目录时没有当前选中条目。
+右边是当前选中的文本文件的内容，如果当前没有选中任何文本文件，则显示一个提示信息。
+文件列表和文件内容两部分都会在其内容超过当前视图高度时显示滚动条，可以滚动查看。
+
+考虑这样的python对象：
+【【【
+class ImageDescriptor:
+    def __init__(self, unique_images: Set[Path], similar_groups: List[List[Path]]):
+        self.unique_images = unique_images
+        self.similar_groups = similar_groups
+
+    def serialize(self, filepath: str):
+        """将描述信息保存为文本文件"""
+        print(f"Saving description to {filepath}")
+        with open(filepath, 'w') as file:
+            file.write("Unique Images:\n")
+            for image in self.unique_images:
+                file.write(f"{image.name}\n")
+            file.write("\nSimilar Groups:\n")
+            for group in self.similar_groups:
+                file.write(f"Group:\n")
+                for image in group:
+                    file.write(f"{image.name}\n")
+                file.write("\n")
+】】】
+它序列化的文本文件内容是这样的：
+【【【
+Unique Images:
+ab.jpg
+p.jpg
+bi.jpg
+
+Similar Groups:
+Group:
+k.jpg
+af.jpg
+bn.jpg
+cd.jpg
+a.jpg
+bw.jpg
+
+Group:
+k.jpg
+cd.jpg
+bd.jpg
+
+Group:
+aq.jpg
+am.jpg
+】】】
+我需要这个程序在打开目录时，自动识别哪些文本文件是这个对象的序列化文件，然后只在左侧列表展示序列化文件，剔除掉其他文件。
+同时，需要在点击左侧列表的条目时，自动反序列化一个该对象，留待后续增加的需求使用。
+工具需要使用python编写。
+]]]
+
+你会在以下代码（基础代码）的基础上做修改来实现新的需求：
+
+[[[
+import os
+import sys
+from PyQt5 import QtWidgets, QtCore
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QListWidget, QFileDialog, QListWidgetItem, QMessageBox
+from PyQt5.QtCore import QFileSystemWatcher
+from pathlib import Path
+
+class ImageDescriptor:
+    def __init__(self, unique_images, similar_groups):
+        self.unique_images = set(unique_images)
+        self.similar_groups = similar_groups
+
+    @classmethod
+    def deserialize(cls, filepath):
+        with open(filepath, 'r') as file:
+            content = file.read()
+        lines = content.split('\n')
+        if not lines[0].startswith("Unique Images:"):
+            raise ValueError("Not a valid descriptor file")
+        
+        unique_images = []
+        similar_groups = []
+        parsing_mode = 'unique'
+        
+        for line in lines[1:]:
+            if line.startswith("Similar Groups:"):
+                parsing_mode = 'groups'
+                continue
+            if line.startswith("Group:"):
+                current_group = []
+                similar_groups.append(current_group)
+                continue
+            if line.strip() and parsing_mode == 'unique':
+                unique_images.append(Path(line.strip()))
+            elif line.strip() and parsing_mode == 'groups':
+                current_group.append(Path(line.strip()))
+
+        return cls(unique_images, similar_groups)
+
+class FileViewerApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.title = '文件浏览器'
+        self.left = 10
+        self.top = 10
+        self.width = 640
+        self.height = 480
+        self.current_directory = ''
+        self.current_selected_file = None
+        self.watcher = QFileSystemWatcher()
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle(self.title)
+        self.setGeometry(self.left, self.top, self.width, self.height)
+
+        widget = QtWidgets.QWidget()
+        self.setCentralWidget(widget)
+        vLayout = QVBoxLayout()
+
+        hLayout = QHBoxLayout()
+        self.entry_directory = QtWidgets.QLineEdit()
+        self.btn_open = QPushButton('打开目录')
+        self.btn_open.clicked.connect(self.open_directory)
+        hLayout.addWidget(self.entry_directory)
+        hLayout.addWidget(self.btn_open)
+
+        self.file_list = QListWidget()
+        self.file_list.itemClicked.connect(self.display_file_content)
+        self.content_display = QTextEdit()
+        self.content_display.setReadOnly(True)
+
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        splitter.addWidget(self.file_list)
+        splitter.addWidget(self.content_display)
+        splitter.setSizes([200, 440])
+
+        vLayout.addLayout(hLayout)
+        vLayout.addWidget(splitter)
+        widget.setLayout(vLayout)
+
+    def open_directory(self):
+        directory = QFileDialog.getExistingDirectory(self, "选择文件夹", "")
+        if directory:
+            self.entry_directory.setText(directory)
+            if self.current_directory:
+                self.watcher.removePath(self.current_directory)
+            self.current_directory = directory
+            self.watcher.addPath(directory)
+            self.watcher.directoryChanged.connect(self.directory_changed)
+            self.populate_files_list(directory)
+
+    def populate_files_list(self, directory):
+        self.file_list.clear()
+        files = [f for f in os.listdir(directory) if f.endswith('.txt')]
+        descriptor_files = [f for f in files if self.is_descriptor_file(os.path.join(directory, f))]
+        current_index = -1
+        for i, file in enumerate(descriptor_files):
+            item = QListWidgetItem(file)
+            self.file_list.addItem(item)
+            if file == self.current_selected_file:
+                current_index = i
+        
+        if current_index != -1:
+            self.file_list.setCurrentRow(current_index)
+        else:
+            self.current_selected_file = None
+            self.content_display.clear()  # Clear the content display if the current selected file is no longer present
+
+    def is_descriptor_file(self, filepath):
+        try:
+            with open(filepath, 'r') as file:
+                first_line = file.readline()
+                return "Unique Images:" in first_line
+        except Exception as e:
+            return False
+
+    def display_file_content(self, item):
+        self.current_selected_file = item.text()
+        directory = self.entry_directory.text()
+        filepath = os.path.join(directory, item.text())
+        try:
+            descriptor = ImageDescriptor.deserialize(filepath)
+            self.content_display.setText(f"Loaded descriptor for {len(descriptor.unique_images)} unique images and {len(descriptor.similar_groups)} groups.")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"无法解析文件: {e}")
+
+    def directory_changed(self, path):
+        if path == self.current_directory:
+            self.populate_files_list(path)
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    ex = FileViewerApp()
+    ex.show()
+    sys.exit(app.exec_())
+]]]
+
+新的需求是：
+
+[[[
+右侧区域显示当前选中的描述文件里记录的图片，规则如下：
+1、显示标题“唯一图片”，布局靠左。
+2、显示Unique Images列表里的每张图片，按以下规则：
+    a、图片缩放为256*256的大小显示。
+    b、按矩阵排列，每行个数根据窗口大小动态调整，即窗口大小改变时每行显示数量也需要变化。
+    c、图片之间需要有合适的间距，图片下方需要显示图片文件名称（不包括扩展名）
+3、显示标题“重复图片组”，布局靠左。
+4、显示Similar Groups列表里的每组图片，按以下规则：
+    a、每组图片开始前显示次级标题“第N组”，其中N为当前组的编号，也靠左布局。
+    b、显示这个组包含的所有图片，规则和上方第2条里的a、b、c要求一致。
+
+需要注意的是描述文件里记录的都是图片文件都是和描述文件在同一目录。如果遇到读取失败或其他原因展示失败的图片，需要在图片位置显示一个红叉，并且图片名字的文字也显示为红色。
+]]]
+
+你只需要在上面代码的基础上做尽量少的修改来解决问题，对于可以不用修改的部分不进行修改。
+不要试图删除基础代码中的注释和用于调试的日志输出，除非这是必要的。
+最后，给我展示修改后用于替换基础代码的完整代码（最终代码），包括修改了的部分和未修改的部分。
+给我的最终代码应当是完整可运行的。
+最终代码不应该包含任何省略或指向性注释。
+不应该包含类似于“...省略实现”、“...保持不变”、“与...相同”这样的注释来代替实际代码。

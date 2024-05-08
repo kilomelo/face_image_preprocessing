@@ -9,97 +9,139 @@
 你编写这段代码的最终目的是：
 
 [[[
-给定一个目录，递归将目录下所有图片文件移动到该目录，并重命名。命名规则为：英文字母表示的26进制名称，例如找到的第一个文件改名为a，第二个文件改名为b，第26个文件改名为z，第27个文件改名为aa，第28个文件改名为ab，依此类推。
-以python编写，代码会运行在vscode的jupyter notebook编辑器中。
+输入一个目录，给目录中所有的图像文件去重。使用两种判断图像重复的算法：哈希值比较法和ORB特征距离法。
+使用面向对象的方式编码。有如下对象：
+1、相似图像组，由至少两张图片组成。
+2、描述，由一个已被判明是唯一图像的列表和一个相似图像组对象的列表组成。
+3、重复图像判断器，这个判断器可能是ORB特征判断器也可能是哈希值判断器。每个判断器有其属性来定义不同算法需要的阈值或精度。
+比如哈希判断器有哈希精度的属性，如果是8，则图像转换为哈希值时会以8*8的大小计算。又比如ORB特征判断器有阈值属性，有生成ORB特征点数量属性。
+可以传入一组图片给判断器，判断器会输出一个描述对象，表示这个判断器认为哪些图像是唯一的，哪些图像是相似的。
+
+算法大致如下：
+1、创建判断器对象列表，列表中首先包含N个哈希判断器对象，他们的精度从8开始以2的倍数递增，第一个是8，第二个是16，以此类推。列表中还包含N个ORB判断器，阈值、生成特征点数量依次提高，即他们对重复图像的判断越来越严格。
+2、创建出目录的描述对象，此时应该所有图片都在一个相似图像组里，唯一图像列表为空。
+3、循环，直至应用完所有的判断器。对于每一次循环做如下操作：
+    【缩进1】取得当前判断器对象。
+    【缩进1】遍历目录描述对象的相似图像列表，每一项做如下操作：
+        【缩进2】对相似图像组的每个元素应用当前判断器，即传入相似图像组的所有图片给判断器进行是否重复的判断。输出的描述对象存入一个临时描述对象列表。
+        【缩进2】将此相似图像组列表项从目录描述对象的相似图片组列表中删除。
+    【缩进1】把临时描述对象列表的所有项与目录的描述对象合并，合并规则是：唯一图像列表合并，相似图像组列表合并。合并后输出目录描述对象中唯一图像列表的长度。
+    【缩进1】当前判断器标记为已应用。
+4、经过上面的循环，得到了一个最终的目录的描述对象，这个对象应该可以表示该目录下哪些图片是唯一的，哪些图片是互相重复的。输出这个描述对象。
 ]]]
 
 你会在以下代码（基础代码）的基础上做修改来实现新的需求：
 
 [[[
+from PIL import Image
+import numpy as np
+import cv2
 import os
-import shutil
 from pathlib import Path
+from imagehash import phash
+from itertools import combinations
+from typing import List, Set, Tuple
+from termcolor import colored
 
-def decimal_to_base26(n):
-    """将十进制数字转换为26进制字母表示"""
-    result = ""
-    while n > 0:
-        n, remainder = divmod(n - 1, 26)
-        result = chr(remainder + ord('a')) + result
-    return result
+class ImageDescriptor:
+    def __init__(self, unique_images: Set[Path], similar_groups: List[List[Path]]):
+        self.unique_images = unique_images
+        self.similar_groups = similar_groups
 
-def move_and_rename_images(directory):
-    """
-    递归遍历指定目录，将所有图片文件移动到该目录并重命名。
-    完成后，根据成功处理的文件记录，删除非图片文件和未成功处理的图片及空目录。
-    
-    图片文件被重命名为基于26进制的字母组合，如'a', 'b', ..., 'z', 'aa', 'ab', ...
-    
-    参数:
-    directory (str or Path): 目标目录路径
-    """
-    counter = 0  # 初始化计数器
-    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']  # 可以根据需要添加其他图片扩展名
-    successful_files = set()  # 记录成功处理的文件名
-    
-    # 确保目录存在
-    target_dir = Path(directory)
-    if not target_dir.is_dir():
-        print(f"目录不存在: {directory}")
-        return
-    
-    # 移动并重命名图片，同时记录成功处理的文件
-    for root, dirs, files in os.walk(directory, topdown=False):
-        for name in files:
-            # 检查文件是否为图片
-            if any(name.lower().endswith(ext) for ext in image_extensions):
-                # 在使用前先增加counter的值，确保首次调用时有有效名字
-                counter += 1
-                source_path = Path(root) / name
-                new_name = decimal_to_base26(counter)
-                target_path = target_dir / f"{new_name}.jpg"  # 假设重命名后的文件统一为.jpg格式
-                
-                try:
-                    shutil.move(str(source_path), str(target_path))
-                    print(f"移动并重命名: {source_path} -> {target_path}")
-                    successful_files.add(new_name + ".jpg")  # 记录成功重命名的文件
-                except Exception as e:
-                    print(f"处理文件{source_path}时发生错误: {e}")
-    
-    # 清理非图片文件、未成功处理的图片文件和空目录
-    def clean_non_image_or_unprocessed_files_and_dirs(path, successful_files_set):
-        for item in path.iterdir():
-            if item.is_file():
-                if item.suffix.lower() not in image_extensions or item.name not in successful_files_set:
-                    try:
-                        item.unlink()
-                        print(f"删除文件: {item}")
-                    except Exception as e:
-                        print(f"删除文件{item}时发生错误: {e}")
-            elif item.is_dir():
-                clean_non_image_or_unprocessed_files_and_dirs(item, successful_files_set)  # 递归清理子目录
-                try:
-                    if not any(item.iterdir()):  # 如果是空目录，则删除
-                        item.rmdir()
-                        print(f"删除空目录: {item}")
-                except Exception as e:
-                    print(f"删除空目录{item}时发生错误: {e}")
-                    
-    clean_non_image_or_unprocessed_files_and_dirs(target_dir, successful_files)
+class HashDetector:
+    def __init__(self, precision: int):
+        self.precision = precision
 
-if __name__ == "__main__":
-    # 示例：请替换为实际需要处理的目录路径
-    target_directory = "/Users/chenweichu/dev/data/test9"
-    print("开始处理...")
-    move_and_rename_images(target_directory)
-    print("处理完成.")
+    def detect(self, images: List[Path]) -> ImageDescriptor:
+        print(f"Detecting duplicates using perceptual hash, precision: {self.precision}\nimages cnt: {len(images)}")
+        hash_dict = {}
+        for image_path in images:
+            with Image.open(image_path) as img:
+                img_hash = phash(img.convert("L").resize((self.precision, self.precision)))
+                if img_hash in hash_dict:
+                    hash_dict[img_hash].append(image_path)
+                else:
+                    hash_dict[img_hash] = [image_path]
+        print(f"Found {len(hash_dict)} unique hashes")
+        unique_images = set()
+        similar_groups = []
+        for paths in hash_dict.values():
+            if len(paths) == 1:
+                unique_images.add(paths[0])
+            else:
+                similar_groups.append(paths)
+        print(f"Found {len(unique_images)} unique images, {len(similar_groups)} similar groups")
+        return ImageDescriptor(unique_images, similar_groups)
+
+class ORBDetector:
+    def __init__(self, nfeatures: int, threshold: float):
+        self.nfeatures = nfeatures
+        self.threshold = threshold
+
+    def detect(self, images: List[Path]) -> ImageDescriptor:
+        keypoints_dict = {img: self._extract_features(img) for img in images}
+        similar_groups = []
+        unique_images = set(images)
+        
+        for img1, img2 in combinations(images, 2):
+            kp1, des1 = keypoints_dict[img1]
+            kp2, des2 = keypoints_dict[img2]
+            if des1 is not None and des2 is not None:
+                if self._match_features(des1, des2) > self.nfeatures * self.threshold:
+                    similar_groups.append([img1, img2])
+                    if img1 in unique_images:
+                        unique_images.remove(img1)
+                    if img2 in unique_images:
+                        unique_images.remove(img2)
+
+        return ImageDescriptor(unique_images, similar_groups)
+
+    def _extract_features(self, image_path: Path):
+        orb = cv2.ORB_create(self.nfeatures)
+        img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+        return orb.detectAndCompute(img, None)
+
+    def _match_features(self, des1, des2):
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = bf.match(des1, des2)
+        return len(matches)
+
+class ImageDeduplicator:
+    def __init__(self, directory: str):
+        self.directory = directory
+        self.detectors = [
+            HashDetector(8), # HashDetector(16),
+            ORBDetector(500, 0.7), ORBDetector(1000, 0.8)
+        ]
+
+    def deduplicate(self):
+        images = [path for path in Path(self.directory).glob("*") if path.suffix.lower() in [".jpg", ".png"]]
+        descriptor = ImageDescriptor(set(), [images])
+
+        for detector in self.detectors:
+            print(colored(f"Processed with {type(detector).__name__}[{id(detector)}], similar_groups count: {len(descriptor.similar_groups)}", "yellow"))
+            new_descriptor = ImageDescriptor(descriptor.unique_images, [])
+            for group in descriptor.similar_groups:
+                print(f"Processing group of size {len(group)}")
+                result = detector.detect(group)
+                new_descriptor.unique_images |= result.unique_images
+                new_descriptor.similar_groups.extend(result.similar_groups)
+            descriptor = new_descriptor
+            print(colored(f"unique count: {len(descriptor.unique_images)}", "yellow"))
+        
+        return descriptor
+
+# Example usage
+deduplicator = ImageDeduplicator("/Users/chenweichu/dev/data/test")
+final_descriptor = deduplicator.deduplicate()
+print(f"Final unique images count: {len(final_descriptor.unique_images)}")
 ]]]
 
 新的需求是：
 
 [[[
-将成功操作的文件都记录到一个文本文件中（操作记录），包括移动和重命名之前该文件的路径和移动重命名之后该文件的路径。这个文本文件保存在输入目录中，如果创建前存在则覆盖。
-操作记录是用来做逆转操作的。你还需要增加一个逆转操作方法，这个方法传入目录路径，功能是根据目录中找到的操作记录文本文件的内容，把经过移动重命名的文件都还原到原来的路径和文件名。
+给描述类增加一个序列化的方法，可以传入文件路径序列化为文本文件。记录的所有图片只需要文件名和扩展名，不需要保存绝对路径。
+在这个循环：for detector in self.detectors:里，每次更新了描述类后，都将描述类序列化到工作目录，文件名里需要有时间戳和这次循环使用的判断器的名字。
 ]]]
 
 你只需要在上面代码的基础上做尽量少的修改来解决问题，对于可以不用修改的部分不进行修改。
