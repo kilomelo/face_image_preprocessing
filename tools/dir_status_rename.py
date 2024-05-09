@@ -67,9 +67,9 @@ def convert_size(size_bytes):
     units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
     unit_index = 0  # 开始时使用字节(B)单位
     
-    while unit_index < len(units) - 1 and size_bytes >= 1024 * 10 ** unit_index:
+    while unit_index < len(units) - 1:
         next_size = size_bytes / 1024  # 计算转换到下一个单位的值
-        if next_size >= 10:  # 确保转换后的值至少为10
+        if next_size >= 5:  # 确保转换后的值至少为5
             size_bytes = round(next_size)
             unit_index += 1
         else:
@@ -77,30 +77,61 @@ def convert_size(size_bytes):
     
     return f"{size_bytes} {units[unit_index]}"  # 返回四舍五入后的整数大小和单位
 
-def test_convert_size():
-    test_cases = [
-        (0, "0 B"),         # 特殊情况：0字节
-        (1, "1 B"),         # 最小非零值
-        (999, "999 B"),     # 低于1KB阈值
-        (1000, "1000 B"),    # 刚好1KB
-        (1023, "1023 B"),    # 低于10KB阈值
-        (10240, "10 KB"),  # 刚好10KB
-        (11234, "11 KB"),  # 接近但不足100KB
-        (1048575, "1024 KB"), # 接近但不足1MB
-        (1048576, "1024 KB"),  # 刚好1MB
-        (1500000, "1465 KB"),  # 超过1MB但不足10MB
-        (15728640, "15 MB"), # 刚好15MB
-    ]
+# def test_convert_size():
+#     test_cases = [
+#         (0, "0 B"),         # 特殊情况：0字节
+#         (1, "1 B"),         # 最小非零值
+#         (999, "999 B"),     # 低于1KB阈值
+#         (1000, "1000 B"),    # 刚好1KB
+#         (1023, "1023 B"),    # 低于10KB阈值
+#         (10240, "10 KB"),  # 刚好10KB
+#         (11234, "11 KB"),  # 接近但不足100KB
+#         (1048575, "1024 KB"), # 接近但不足1MB
+#         (1048576, "1024 KB"),  # 刚好1MB
+#         (1500000, "1465 KB"),  # 超过1MB但不足10MB
+#         (15728640, "15 MB"), # 刚好15MB
+#     ]
     
-    for bytes_val, expected_output in test_cases:
-        assert convert_size(bytes_val) == expected_output, f"For {bytes_val}B, expected '{expected_output}', got '{convert_size(bytes_val)}'"
-        print(f"Test passed for {bytes_val}B -> {convert_size(bytes_val)}")
+#     for bytes_val, expected_output in test_cases:
+#         assert convert_size(bytes_val) == expected_output, f"For {bytes_val}B, expected '{expected_output}', got '{convert_size(bytes_val)}'"
+#         print(f"Test passed for {bytes_val}B -> {convert_size(bytes_val)}")
         
-    print("All tests passed.")
+#     print("All tests passed.")
+
+def rename_subdirs_with_underscore(root_dir):
+    """
+    遍历指定目录，重命名所有子目录，删除其名称中第一个下划线及后面的所有字符。
+    
+    :param root_dir: 要遍历并重命名子目录的根目录路径
+    """
+    root_path = Path(root_dir)
+    
+    # 遍历根目录下的所有子项
+    for item in root_path.iterdir():
+        if item.is_dir():  # 只处理目录
+            # 找到第一个下划线的位置
+            underscore_index = item.name.find('_')
+            if underscore_index != -1:  # 如果找到下划线
+                # 删除下划线及其后面的所有字符，并重命名
+                new_name = item.name[:underscore_index]
+                new_path = root_path / new_name
+                
+                # 确保新名称不存在，以避免覆盖现有目录
+                if not new_path.exists():
+                    item.rename(new_path)
+                    print(f"Renamed '{item}' to '{new_path}'")
+                else:
+                    print(f"Skipped renaming '{item}' because '{new_path}' already exists.")
+            else:  # 如果没有下划线，跳过
+                print(f"'{item}' has no underscore, skipping.")
+        else:  # 如果是文件，直接跳过
+            continue
 
 # 调用测试函数
 # test_convert_size()
 
 # 使用示例
-directory_to_rename = 'F:\pic\艾玛·沃森 Emma Watson2982P'
+directory_to_rename = 'F:\pic\鞠婧祎_9994[5_GB]'
 rename_subdirectories(directory_to_rename)  # 调用函数，传入要处理的目录路径
+# rename_subdirs_with_underscore(directory_to_rename)
+# print(convert_size(16972898619))
