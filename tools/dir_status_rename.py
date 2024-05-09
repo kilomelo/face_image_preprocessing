@@ -47,7 +47,7 @@ def rename_subdirectories(directory):
             total_size_str = convert_size(total_size).replace(" ", "_")
             
             # 构建新的目录名
-            new_name = f"{subdir.name}_{file_count}_{total_size_str}"
+            new_name = f"{subdir.name}_{file_count}[{total_size_str}]"
             new_path = directory / new_name  # 创建新路径
             
             # 使用shutil.move重命名目录（实质上是移动到新位置）
@@ -56,20 +56,51 @@ def rename_subdirectories(directory):
 
 def convert_size(size_bytes):
     """
-    将字节大小转换为人类可读的格式（B, KB, MB, GB, TB, PB）。
+    将字节大小转换为人类可读的格式（B, KB, MB, GB, TB, PB），确保结果无小数点，且在转换后的值至少为10时进入下一个单位。
     
     参数:
     - size_bytes: 要转换的原始大小（字节）。
     
     返回:
-    - 字符串，表示转换后的大小及单位。
+    - 字符串，表示转换后的大小及单位，无小数部分。
     """
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB', 'PB']:  # 单位循环
-        if size_bytes < 1024.0:  # 如果小于1024则使用当前单位
-            return f"{size_bytes:.2f} {unit}"  # 格式化输出，保留两位小数
-        size_bytes /= 1024.0  # 否则，除以1024进入下一个单位
-    return f"{size_bytes:.2f} PB"  # 最后单位是PB的情况
+    units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+    unit_index = 0  # 开始时使用字节(B)单位
+    
+    while unit_index < len(units) - 1 and size_bytes >= 1024 * 10 ** unit_index:
+        next_size = size_bytes / 1024  # 计算转换到下一个单位的值
+        if next_size >= 10:  # 确保转换后的值至少为10
+            size_bytes = round(next_size)
+            unit_index += 1
+        else:
+            break  # 如果不足10，则停留在当前单位，结束循环
+    
+    return f"{size_bytes} {units[unit_index]}"  # 返回四舍五入后的整数大小和单位
+
+def test_convert_size():
+    test_cases = [
+        (0, "0 B"),         # 特殊情况：0字节
+        (1, "1 B"),         # 最小非零值
+        (999, "999 B"),     # 低于1KB阈值
+        (1000, "1000 B"),    # 刚好1KB
+        (1023, "1023 B"),    # 低于10KB阈值
+        (10240, "10 KB"),  # 刚好10KB
+        (11234, "11 KB"),  # 接近但不足100KB
+        (1048575, "1024 KB"), # 接近但不足1MB
+        (1048576, "1024 KB"),  # 刚好1MB
+        (1500000, "1465 KB"),  # 超过1MB但不足10MB
+        (15728640, "15 MB"), # 刚好15MB
+    ]
+    
+    for bytes_val, expected_output in test_cases:
+        assert convert_size(bytes_val) == expected_output, f"For {bytes_val}B, expected '{expected_output}', got '{convert_size(bytes_val)}'"
+        print(f"Test passed for {bytes_val}B -> {convert_size(bytes_val)}")
+        
+    print("All tests passed.")
+
+# 调用测试函数
+# test_convert_size()
 
 # 使用示例
-directory_to_rename = '/path/to/your/directory'
+directory_to_rename = 'F:\pic\艾玛·沃森 Emma Watson2982P'
 rename_subdirectories(directory_to_rename)  # 调用函数，传入要处理的目录路径
