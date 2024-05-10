@@ -14,7 +14,9 @@ def count_extensions(directory):
     pbar = tqdm(desc="正在计数文件")
 
     # 遍历目录中的文件
-    for root, _, files in os.walk(directory):
+    for root, dirs, files in os.walk(directory):
+        if 'thumbnail' in dirs:
+            dirs.remove('thumbnail')  # 忽略thumbnail目录
         for file in files:
             ext = Path(file).suffix.lower()  # 获取文件扩展名并转为小写
             extension_count[ext] += 1
@@ -54,5 +56,5 @@ def main(directory):
     for ext, count in sorted(extension_count.items()):
         tqdm.write(f"扩展名 '{ext}': {count} 个文件")
 
-directory = "/Volumes/192.168.1.173/pic/热巴_6653[53_GB]"
+directory = "/Volumes/192.168.1.173/pic/陈都灵_501[167_MB]"
 main(directory)

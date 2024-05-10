@@ -128,6 +128,7 @@ class FileViewerApp(QMainWindow):
             QMessageBox.critical(self, "错误", f"无法解析文件: {e}")
 
     def update_image_display(self, descriptor):
+        return
         self.clear_layout(self.image_layout)
         
         row = 0

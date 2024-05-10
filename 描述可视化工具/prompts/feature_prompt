@@ -15,13 +15,76 @@
 目录输入框右侧有个按钮可以选择打开哪个目录，当前打开的目录路径会在目录输入框里显示。
 
 图片显示区域显示目录里的所有图片，按以下规则：
-    a、图片均缩放为256*256的大小显示。
-    b、按矩阵排列，每行个数根据窗口大小动态调整，即窗口大小改变时每行显示数量也需要变化。
-    c、图片下方需要显示图片文件名称（不包括扩展名），图片之间需要有合适的间距。
+    a、首先显示一个居左的标题，文字是:"所有图片"
+    a、图片按矩阵排列，每行个数根据窗口大小计算。
+    c、图片采用懒加载。只有当图片在视图范围内时，才加载并显示，否则显示一个256×256的占位图形。需要注意的是显，当示区域滚动时，图片的显示状态可能会发生变化。
+    b、图片左上角需要显示图片文件名称（不包括扩展名）
 
 图片显示区域会在其内容超过当前视图高度时显示滚动条，可以滚动查看。
 
 工具需要使用python编写，使用Qt作为ui框架，Matplotlib作为图片处理和显示工具。
+]]]
+
+这是部分已实现的代码：
+[[[
+import sys
+import os
+import logging
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QScrollArea, QLabel, QGridLayout
+from PyQt5.QtCore import Qt
+
+# 配置日志
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class ImageGallery(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+
+    def initUI(self):
+        # 主布局
+        mainLayout = QVBoxLayout()
+        self.setLayout(mainLayout)
+
+        # 顶部布局：目录输入与选择按钮
+        topLayout = QHBoxLayout()
+        mainLayout.addLayout(topLayout)
+        self.directoryInput = QLineEdit()
+        self.directoryInput.setPlaceholderText("请输入或选择一个目录...")
+        topLayout.addWidget(self.directoryInput)
+        self.openButton = QPushButton("打开")
+        self.openButton.clicked.connect(self.openDirectory)
+        topLayout.addWidget(self.openButton)
+
+        # 图片显示区域
+        self.scrollArea = QScrollArea()
+        self.scrollArea.setWidgetResizable(True)
+        mainLayout.addWidget(self.scrollArea)
+
+        self.imageContainer = QWidget()
+        self.imageLayout = QGridLayout()
+        self.imageContainer.setLayout(self.imageLayout)
+        self.scrollArea.setWidget(self.imageContainer)
+
+        self.setWindowTitle('图片浏览器')
+        self.setGeometry(100, 100, 800, 600)
+        self.show()
+
+    def openDirectory(self):
+        dir_path = QFileDialog.getExistingDirectory(self, "选择文件夹")
+        if dir_path:
+            self.directoryInput.setText(dir_path)
+            self.loadImages(dir_path)
+
+    def loadImages(self, dir_path):
+        # 还未实现。
+        return
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    ex = ImageGallery()
+    sys.exit(app.exec_())
+
 ]]]
 
 给我展示你编写的最终代码，这段代码应当是完整可运行的。

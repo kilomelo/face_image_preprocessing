@@ -1,73 +1,31 @@
-# 迭代编号：4
-from pathlib import Path
+你刚刚编写的代码运行似乎出现了一些问题，找出并修复它。
+
+运行的代码是：
+
+[[[
+# 迭代编号：3
 import sys
 import os
 import logging
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QScrollArea, QLabel, QGridLayout, QSizePolicy
-from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt, QSize, QTimer, QFileSystemWatcher
+from PyQt5.QtGui import QPixmap, QPainter, QColor
+from PyQt5.QtCore import Qt, QSize, QTimer, QRect
 
 # 配置日志
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-class ImageDescriptor:
-    def __init__(self, unique_images, similar_groups):
-        self.unique_images = set(unique_images)
-        self.similar_groups = similar_groups
-
-    @classmethod
-    def deserialize(cls, filepath):
-        with open(filepath, 'r') as file:
-            content = file.read()
-        lines = content.split('\n')
-        if not lines[0].startswith("Unique Images:"):
-            raise ValueError("Not a valid descriptor file")
-        
-        base_path = Path(filepath).parent
-        unique_images = []
-        similar_groups = []
-        current_group = []
-        parsing_mode = 'unique'
-        
-        for line in lines[1:]:
-            if line.startswith("Similar Groups:"):
-                parsing_mode = 'groups'
-                continue
-            elif line.startswith("Group:"):
-                if current_group:
-                    similar_groups.append(current_group)
-                current_group = []
-                continue
-            elif line.strip():
-                image_path = base_path / line.strip()
-                if parsing_mode == 'unique':
-                    unique_images.append(image_path)
-                elif parsing_mode == 'groups':
-                    current_group.append(image_path)
-
-        if current_group:
-            similar_groups.append(current_group)
-        
-        return cls(unique_images, similar_groups)
-
 class ImageGallery(QWidget):
-    def __init__(self, default_directory=None):
+    def __init__(self):
         super().__init__()
         self.spacing = 10  # 每个图片间的间隙
         self.image_width = 128  # 图片宽度
         self.image_height = 128  # 图片高度
-        self.label_height = 30 # 标签高度
         self.image_files = {}  # 存储文件路径
         self.image_labels = {}  # 存储图片标签
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self.handleVisibilityChange)  # 连接超时信号到处理函数
-        self.watcher = QFileSystemWatcher()
+        self.timer.timeout.connect(self.handleResizeAfterUpdate)  # 连接超时信号到处理函数
 
         self.initUI()  # 初始化用户界面
-
-        if default_directory and os.path.exists(default_directory) and os.path.isdir(default_directory):
-            self.directoryInput.setText(default_directory)
-            self.prepareImages(default_directory)
 
     def initUI(self):
         # 主布局
@@ -87,8 +45,7 @@ class ImageGallery(QWidget):
         # 图片显示区域
         self.scrollArea = QScrollArea()
         self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.verticalScrollBar().valueChanged.connect(self.scrollbarValueChanged)  # 滚动时加载可见图片
-        self.scrollArea.horizontalScrollBar().valueChanged.connect(self.scrollbarValueChanged)  # 滚动时加载可见图片
+        self.scrollArea.verticalScrollBar().valueChanged.connect(self.loadVisibleImages)  # 滚动时加载可见图片
         mainLayout.addWidget(self.scrollArea)
 
         self.imageContainer = QWidget()
@@ -114,7 +71,6 @@ class ImageGallery(QWidget):
         logging.info(f"准备目录 {dir_path} 中的图片")
         image_files = [f for f in os.listdir(dir_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
         self.image_files = {f: os.path.join(dir_path, f) for f in image_files}
-        print(f"找到 {len(self.image_files)} 张图片")
         self.displayPlaceholderImages()
 
     def displayPlaceholderImages(self):
@@ -126,7 +82,6 @@ class ImageGallery(QWidget):
             label.setStyleSheet("background-color: gray")  # 灰色占位图
             textLabel = QLabel(filename.split('.')[0])
             textLabel.setAlignment(Qt.AlignCenter)
-            textLabel.setFixedHeight(self.label_height)
             self.imageLayout.addWidget(label, row, col)
             self.imageLayout.addWidget(textLabel, row + 1, col)
             self.image_labels[filename] = label
@@ -135,40 +90,72 @@ class ImageGallery(QWidget):
             if col >= num_columns:
                 row += 2  # 为文件名标签留出空间
                 col = 0
-
-        print("图片标签准备完成")
-        self.timer.start(200)  # 启动定时器重新调整布局
+        self.loadVisibleImages()
 
     def loadVisibleImages(self):
-        logging.debug("加载可见图片")
         visible_rect = self.scrollArea.viewport().rect()
         for filename, label in self.image_labels.items():
-            label_rect = label.geometry().translated(-self.scrollArea.horizontalScrollBar().value(), -self.scrollArea.verticalScrollBar().value())
-            visible = visible_rect.intersects(label_rect)
-            pixmap = label.pixmap()
-            loaded = pixmap is not None and not pixmap.isNull()
-            if visible and not loaded:
-                logging.debug(f"加载图片：{filename}")
-                pixmap = QPixmap(self.image_files[filename]).scaled(self.image_width, self.image_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                label.setPixmap(pixmap)
-            if not visible and loaded:
-                logging.debug(f"卸载图片：{filename}")
-                label.setPixmap(QPixmap())
-    
-    def scrollbarValueChanged(self):
-        self.timer.start(200)  # 启动定时器重新调整布局
+            if label.isVisible() and visible_rect.intersects(label.geometry()):
+                if label.pixmap() is None:  # 检查是否已加载图片
+                    pixmap = QPixmap(self.image_files[filename]).scaled(self.image_width, self.image_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    label.setPixmap(pixmap)
+            else:
+                label.setPixmap(None)  # 卸载不可见的图片
 
     def resizeEvent(self, event):
         # 清除现有的图片显示以响应窗口大小变化
         super().resizeEvent(event)
         self.timer.start(200)  # 启动定时器重新调整布局
 
-    def handleVisibilityChange(self):
+    def handleResizeAfterUpdate(self):
         self.loadVisibleImages()  # 重新加载可见图片
         self.timer.stop()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    ex = ImageGallery("/Users/chenweichu/dev/data/test_副本/thumbnail")
-    # ex = ImageGallery("/Volumes/192.168.1.173/pic/鞠婧祎_4999[5_GB]/thumbnail")
+    ex = ImageGallery()
     sys.exit(app.exec_())
+
+]]]
+
+运行能正常显示出界面，加载目录时崩溃：
+
+[[[
+
+2024-05-10 10:29:43,679 - INFO - 准备目录 /Users/chenweichu/dev/data/test14/thumbnail 中的图片
+Traceback (most recent call last):
+  File "/Users/chenweichu/dev/face_image_preprocessing/描述可视化工具/img_matrix_view.py", line 63, in openDirectory
+    self.prepareImages(dir_path)
+  File "/Users/chenweichu/dev/face_image_preprocessing/描述可视化工具/img_matrix_view.py", line 69, in prepareImages
+    self.displayPlaceholderImages()
+  File "/Users/chenweichu/dev/face_image_preprocessing/描述可视化工具/img_matrix_view.py", line 88, in displayPlaceholderImages
+    self.loadVisibleImages()
+  File "/Users/chenweichu/dev/face_image_preprocessing/描述可视化工具/img_matrix_view.py", line 98, in loadVisibleImages
+    label.setPixmap(None)  # 卸载不可见的图片
+TypeError: setPixmap(self, a0: QPixmap): argument 1 has unexpected type 'NoneType'
+zsh: abort      /Users/chenweichu/dev/miniconda3/envs/face-img-mac/bin/python 
+
+]]]
+
+先逐句分析运行结果和报错，然后找到可能出现问题的代码逐句分析代码。
+最后修改代码以修复问题，给和这个问题相关的代码里增加日志输出以方便调试。
+
+修改代码过程中严格遵守以下几条规则：
+1、禁止修改任何和新增需求无关的部分！
+2、所有的方法(method)需要添加详细的注释，包括方法功能，参数、返回值的解释。
+3、每一句代码都需要有注释，以提高代码的可读性。
+4、输出尽量多的日志，以使调试过程中能获取更多的状态信息，提高调试效率。
+5、禁止移除旧代码中的功能，除非这是上文中“此次修改的新需求”里明确要求的。
+6、禁止删除旧代码中被注释掉的代码。
+
+对于迭代编号的标注；
+1、旧代码的迭代编号见代码第一行。
+2、此次修改的迭代编号在旧代码中的迭代编号上加1。修改后的代码的第一行显示此次修改的迭代编号。
+3、此次迭代做出的每一处代码改动都需要用注释标注，标明此次修改的迭代编号。格式为：(改动描述) 迭代编号：(此次改动的迭代编号)。
+4、如果旧代码中有包含迭代编号的注释（非此次迭代编号），删除掉迭代编号，保留对代码解释的部分。
+
+最后，展示修改后用于的完整代码，完整代码应该严格满足以下要求：
+1、是可运行的。
+2、包含此次修改的部分和未修改的部分。
+3、不包含任何省略或指向性注释。
+4、不应该包含类似于“...省略实现”、“...保持不变”、“与...相同”这样的注释来代替实际代码。

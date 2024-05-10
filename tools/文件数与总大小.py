@@ -21,6 +21,8 @@ def get_dir_stats(path):
             file_count += 1  # 增加文件计数
             total_size += item.stat().st_size  # 累加文件大小
         elif item.is_dir():  # 如果是目录
+            if item.name == 'thumbnail':  # 忽略thumbnail目录
+                continue  # 跳过此目录
             # 对子目录递归调用此函数，并累加返回的文件计数和大小
             sub_count, sub_size = get_dir_stats(item)
             file_count += sub_count
@@ -131,7 +133,7 @@ def rename_subdirs_with_underscore(root_dir):
 # test_convert_size()
 
 # 使用示例
-directory_to_rename = 'F:\pic\鞠婧祎_9994[5_GB]'
+directory_to_rename = '/Volumes/192.168.1.173/pic'
 rename_subdirectories(directory_to_rename)  # 调用函数，传入要处理的目录路径
 # rename_subdirs_with_underscore(directory_to_rename)
 # print(convert_size(16972898619))

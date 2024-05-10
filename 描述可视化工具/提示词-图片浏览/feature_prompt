@@ -1,0 +1,413 @@
+你是一位经验丰富的软件工程师。
+你的代码质量很高，可读性强，易于维护，遵循了良好的代码规范，有详细的注释（主要以中文书写）。
+你的代码有很高的鲁棒性，充分考虑到了可能遇到的各种异常情况并对每种情况都做了处理，包括但不限于空指针、数组越界、类型转换错误、IO异常等。
+你的代码在性能方面也有良好的表现，能够高效地处理大量数据。
+
+你将根据我提出的需求，编写一段代码，并确保这段代码符合上述要求。
+
+这是需求，包括过往历次迭代的需求记录：
+[[[
+编写一个查看descripter的工具，这个工具以矩阵的方式展示描述器里记录的图像文件，这些文件在描述器记录文件的同级目录下。
+此次修改的新需求:
+    [[
+    按照目前已经实现的代码中的todo补全代码
+    ]]
+]]]
+
+这是目前已实现的代码：
+[[[
+# 迭代编号：1
+import sys
+import os
+import logging
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QScrollArea, QLabel, QGridLayout, QListWidget, QListWidgetItem, QWidget, QMessageBox
+from PyQt5.QtCore import Qt, QFileSystemWatcher
+from PyQt5 import QtWidgets
+from PyQt5.QtGui import QPixmap
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+from pathlib import Path
+
+# 配置日志
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class ImageDescriptor:
+    # 初始化图像描述器
+    def __init__(self, unique_images, similar_groups):
+        self.unique_images = set(unique_images)
+        self.similar_groups = similar_groups
+
+    # 从文件反序列化图像描述器
+    @classmethod
+    def deserialize(cls, filepath):
+        with open(filepath, 'r') as file:
+            content = file.read()
+        lines = content.split('\n')
+        if not lines[0].startswith("Unique Images:"):
+            raise ValueError("Not a valid descriptor file")
+        
+        base_path = Path(filepath).parent
+        unique_images = []
+        similar_groups = []
+        current_group = []
+        parsing_mode = 'unique'
+        
+        for line in lines[1:]:
+            if line.startswith("Similar Groups:"):
+                parsing_mode = 'groups'
+                continue
+            elif line.startswith("Group:"):
+                if current_group:
+                    similar_groups.append(current_group)
+                current_group = []
+                continue
+            elif line.strip():
+                image_path = base_path / line.strip()
+                if parsing_mode == 'unique':
+                    unique_images.append(image_path)
+                elif parsing_mode == 'groups':
+                    current_group.append(image_path)
+
+        if current_group:
+            similar_groups.append(current_group)
+        
+        return cls(unique_images, similar_groups)
+
+class FileViewerApp(QMainWindow):
+    def __init__(self, default_directory=None):
+        super().__init__()
+        self.title = '文件和图像浏览器'
+        self.left = 10
+        self.top = 10
+        self.width = 640
+        self.height = 480
+        self.current_directory = ''
+        self.current_selected_file = None
+        self.watcher = QFileSystemWatcher()
+        self.initUI()
+
+        if default_directory and os.path.exists(default_directory) and os.path.isdir(default_directory):
+            self.load_dir(default_directory)
+
+    def initUI(self):
+        # 初始化用户界面
+        self.setWindowTitle(self.title)
+        self.setGeometry(self.left, self.top, self.width, self.height)
+
+        widget = QWidget()
+        self.setCentralWidget(widget)
+        vLayout = QVBoxLayout()
+
+        hLayout = QHBoxLayout()
+        self.entry_directory = QLineEdit()
+        self.entry_directory.setPlaceholderText("请输入或选择一个目录...")
+        self.btn_open = QPushButton('打开目录')
+        self.btn_open.clicked.connect(self.open_directory)
+        hLayout.addWidget(self.entry_directory)
+        hLayout.addWidget(self.btn_open)
+
+        self.file_list = QListWidget()
+        self.file_list.itemClicked.connect(self.display_file_content)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.image_container = QWidget()
+        self.scroll_area.setWidget(self.image_container)
+        self.image_layout = QGridLayout()
+        self.image_container.setLayout(self.image_layout)
+
+        # splitter = QHBoxLayout()
+        splitter = QtWidgets.QSplitter(Qt.Horizontal)
+        splitter.addWidget(self.file_list)
+        splitter.addWidget(self.scroll_area)
+        splitter.setSizes([200, 440])
+
+        vLayout.addLayout(hLayout)
+        vLayout.addWidget(splitter)
+        widget.setLayout(vLayout)
+
+    def open_directory(self):
+        # 打开目录并更新文件列表
+        directory = QFileDialog.getExistingDirectory(self, "选择文件夹", "")
+        self.load_dir(directory)
+
+    def load_dir(self, directory):
+        if directory and os.path.exists(directory) and os.path.isdir(directory):
+            self.entry_directory.setText(directory)
+            if self.current_directory:
+                self.watcher.removePath(self.current_directory)
+            self.current_directory = directory
+            self.watcher.addPath(directory)
+            self.watcher.directoryChanged.connect(self.directory_changed)
+            self.populate_files_list(directory)
+        else:
+            logging.error(f"Invalid directory: {directory}")
+
+    def populate_files_list(self, directory):
+        # 填充文件列表
+        self.file_list.clear()
+        files = [f for f in os.listdir(directory) if f.endswith('.txt')]
+        print(f"Found {len(files)} files in {directory}:")
+        descriptor_files = [f for f in files if self.is_descriptor_file(os.path.join(directory, f))]
+        print(f"Found {len(descriptor_files)} descriptor files:")
+        current_select_found = False
+        for file in descriptor_files:
+            item = QListWidgetItem(file)
+            self.file_list.addItem(item)
+            if file == self.current_selected_file:
+                self.file_list.setCurrentItem(item)
+                current_select_found = True
+        if not current_select_found:
+            self.current_selected_file = None
+            self.display_file_content(None)
+
+    def is_descriptor_file(self, filepath):
+        # 检查是否为描述文件
+        try:
+            with open(filepath, 'r') as file:
+                first_line = file.readline()
+                return "Unique Images:" in first_line
+        except Exception as e:
+            logging.error(f"Error checking descriptor file: {e}")
+            return False
+
+    def display_file_content(self, item):
+        if None == item:
+            #todo 清理self.image_container视图，并显示提示信息“当前未选择文件”
+            return
+        # 显示文件内容和相关图像
+        filepath = os.path.join(self.current_directory, item.text())
+        try:
+            descriptor = ImageDescriptor.deserialize(filepath)
+            self.current_selected_file = item.text()
+            self.update_image_display(descriptor)
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"无法解析文件: {e}")
+
+    def update_image_display(self, descriptor):
+        # 更新图像显示区域
+
+        print(f"Updating image display, unique images: {len(descriptor.unique_images)}, similar groups: {len(descriptor.similar_groups)}")
+        self.clear_layout(self.image_layout)
+        #todo 显示descriptor.unique_images列表里所有图片文件，显示方式见代码B，要求保留图片动态加载的逻辑
+
+    def directory_changed(self, path):
+        # 目录变更处理
+        if path == self.current_directory:
+            self.populate_files_list(path)
+
+    def clear_layout(self, layout):
+        # 清空布局中的所有控件
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    ex = FileViewerApp("/Users/chenweichu/dev/data/test")
+    # ex = ImageGallery("/Volumes/192.168.1.173/pic/鞠婧祎_4999[5_GB]/thumbnail")
+    ex.show()
+    sys.exit(app.exec_())
+
+]]]
+
+这是代码B：
+[[[
+    # 迭代编号：4
+from pathlib import Path
+import sys
+import os
+import logging
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QScrollArea, QLabel, QGridLayout, QSizePolicy
+from PyQt5.QtGui import QPixmap
+from PyQt5.QtCore import Qt, QSize, QTimer, QFileSystemWatcher
+
+# 配置日志
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class ImageDescriptor:
+    def __init__(self, unique_images, similar_groups):
+        self.unique_images = set(unique_images)
+        self.similar_groups = similar_groups
+
+    @classmethod
+    def deserialize(cls, filepath):
+        with open(filepath, 'r') as file:
+            content = file.read()
+        lines = content.split('\n')
+        if not lines[0].startswith("Unique Images:"):
+            raise ValueError("Not a valid descriptor file")
+        
+        base_path = Path(filepath).parent
+        unique_images = []
+        similar_groups = []
+        current_group = []
+        parsing_mode = 'unique'
+        
+        for line in lines[1:]:
+            if line.startswith("Similar Groups:"):
+                parsing_mode = 'groups'
+                continue
+            elif line.startswith("Group:"):
+                if current_group:
+                    similar_groups.append(current_group)
+                current_group = []
+                continue
+            elif line.strip():
+                image_path = base_path / line.strip()
+                if parsing_mode == 'unique':
+                    unique_images.append(image_path)
+                elif parsing_mode == 'groups':
+                    current_group.append(image_path)
+
+        if current_group:
+            similar_groups.append(current_group)
+        
+        return cls(unique_images, similar_groups)
+
+class ImageGallery(QWidget):
+    def __init__(self, default_directory=None):
+        super().__init__()
+        self.spacing = 10  # 每个图片间的间隙
+        self.image_width = 128  # 图片宽度
+        self.image_height = 128  # 图片高度
+        self.label_height = 30 # 标签高度
+        self.image_files = {}  # 存储文件路径
+        self.image_labels = {}  # 存储图片标签
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.handleVisibilityChange)  # 连接超时信号到处理函数
+        self.watcher = QFileSystemWatcher()
+
+        self.initUI()  # 初始化用户界面
+
+        if default_directory and os.path.exists(default_directory) and os.path.isdir(default_directory):
+            self.directoryInput.setText(default_directory)
+            self.prepareImages(default_directory)
+
+    def initUI(self):
+        # 主布局
+        mainLayout = QVBoxLayout()
+        self.setLayout(mainLayout)
+
+        # 顶部布局：目录输入与选择按钮
+        topLayout = QHBoxLayout()
+        mainLayout.addLayout(topLayout)
+        self.directoryInput = QLineEdit()
+        self.directoryInput.setPlaceholderText("请输入或选择一个目录...")
+        topLayout.addWidget(self.directoryInput)
+        self.openButton = QPushButton("打开")
+        self.openButton.clicked.connect(self.openDirectory)
+        topLayout.addWidget(self.openButton)
+
+        # 图片显示区域
+        self.scrollArea = QScrollArea()
+        self.scrollArea.setWidgetResizable(True)
+        self.scrollArea.verticalScrollBar().valueChanged.connect(self.scrollbarValueChanged)  # 滚动时加载可见图片
+        self.scrollArea.horizontalScrollBar().valueChanged.connect(self.scrollbarValueChanged)  # 滚动时加载可见图片
+        mainLayout.addWidget(self.scrollArea)
+
+        self.imageContainer = QWidget()
+        self.imageLayout = QGridLayout()
+        self.imageLayout.setHorizontalSpacing(self.spacing)
+        self.imageLayout.setVerticalSpacing(self.spacing)
+        self.imageLayout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.imageLayout.setContentsMargins(0, 0, 0, 0)
+        self.imageContainer.setLayout(self.imageLayout)
+        self.scrollArea.setWidget(self.imageContainer)
+
+        self.setWindowTitle('图片浏览器')
+        self.setGeometry(100, 100, 800, 600)
+        self.show()
+
+    def openDirectory(self):
+        dir_path = QFileDialog.getExistingDirectory(self, "选择文件夹")
+        if dir_path:
+            self.directoryInput.setText(dir_path)
+            self.prepareImages(dir_path)
+
+    def prepareImages(self, dir_path):
+        logging.info(f"准备目录 {dir_path} 中的图片")
+        image_files = [f for f in os.listdir(dir_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
+        self.image_files = {f: os.path.join(dir_path, f) for f in image_files}
+        print(f"找到 {len(self.image_files)} 张图片")
+        self.displayPlaceholderImages()
+
+    def displayPlaceholderImages(self):
+        row, col = 0, 0
+        num_columns = max(1, self.scrollArea.viewport().width() // (self.image_width + self.spacing))
+        for filename in self.image_files:
+            label = QLabel()
+            label.setFixedSize(self.image_width, self.image_height)
+            label.setStyleSheet("background-color: gray")  # 灰色占位图
+            textLabel = QLabel(filename.split('.')[0])
+            textLabel.setAlignment(Qt.AlignCenter)
+            textLabel.setFixedHeight(self.label_height)
+            self.imageLayout.addWidget(label, row, col)
+            self.imageLayout.addWidget(textLabel, row + 1, col)
+            self.image_labels[filename] = label
+
+            col += 1
+            if col >= num_columns:
+                row += 2  # 为文件名标签留出空间
+                col = 0
+
+        print("图片标签准备完成")
+        self.timer.start(200)  # 启动定时器重新调整布局
+
+    def loadVisibleImages(self):
+        logging.debug("加载可见图片")
+        visible_rect = self.scrollArea.viewport().rect()
+        for filename, label in self.image_labels.items():
+            label_rect = label.geometry().translated(-self.scrollArea.horizontalScrollBar().value(), -self.scrollArea.verticalScrollBar().value())
+            visible = visible_rect.intersects(label_rect)
+            pixmap = label.pixmap()
+            loaded = pixmap is not None and not pixmap.isNull()
+            if visible and not loaded:
+                logging.debug(f"加载图片：{filename}")
+                pixmap = QPixmap(self.image_files[filename]).scaled(self.image_width, self.image_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                label.setPixmap(pixmap)
+            if not visible and loaded:
+                logging.debug(f"卸载图片：{filename}")
+                label.setPixmap(QPixmap())
+    
+    def scrollbarValueChanged(self):
+        self.timer.start(200)  # 启动定时器重新调整布局
+
+    def resizeEvent(self, event):
+        # 清除现有的图片显示以响应窗口大小变化
+        super().resizeEvent(event)
+        self.timer.start(200)  # 启动定时器重新调整布局
+
+    def handleVisibilityChange(self):
+        self.loadVisibleImages()  # 重新加载可见图片
+        self.timer.stop()
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    ex = ImageGallery("/Users/chenweichu/dev/data/test_副本/thumbnail")
+    sys.exit(app.exec_())
+
+]]]
+
+修改代码过程中严格遵守以下几条规则：
+1、禁止修改任何和新增需求无关的部分！
+2、所有的方法(method)需要添加详细的注释，包括方法功能，参数、返回值的解释。
+3、每一句代码都需要有注释，以提高代码的可读性。
+4、输出尽量多的日志，以使调试过程中能获取更多的状态信息，提高调试效率。
+5、禁止移除旧代码中的功能，除非这是上文中“此次修改的新需求”里明确要求的。
+6、禁止删除旧代码中被注释掉的代码。
+
+对于迭代编号的标注；
+1、旧代码的迭代编号见代码第一行。
+2、此次修改的迭代编号在旧代码中的迭代编号上加1。修改后的代码的第一行显示此次修改的迭代编号。
+3、此次迭代做出的每一处代码改动都需要用注释标注，标明此次修改的迭代编号。格式为：(改动描述) 迭代编号：(此次改动的迭代编号)。
+4、如果旧代码中有包含迭代编号的注释（非此次迭代编号），删除掉迭代编号，保留对代码解释的部分。
+
+最后，展示修改后用于的完整代码，完整代码应该严格满足以下要求：
+1、是可运行的。
+2、包含此次修改的部分和未修改的部分。
+3、不包含任何省略或指向性注释。
+4、不应该包含类似于“...省略实现”、“...保持不变”、“与...相同”这样的注释来代替实际代码。
