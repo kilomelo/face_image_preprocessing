@@ -4,7 +4,7 @@ import logging
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QScrollArea, QLabel, QGridLayout, QListWidget, QListWidgetItem, QWidget, QMessageBox
 from PyQt5.QtCore import Qt, QFileSystemWatcher, QTimer
 from PyQt5 import QtWidgets
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtGui import QPixmap, QFont
 from pathlib import Path
 from termcolor import colored
 
@@ -59,12 +59,12 @@ class ImageDescriptor:
         if idx < len(self.unique_images):
             return list(self.unique_images)[idx]
         else:
-            cnt = len(self.unique_images)
+            count = len(self.unique_images)
             for group in self.similar_groups:
-                if idx < cnt + len(group):
-                    return group[idx - cnt]
+                if idx < count + len(group):
+                    return group[idx - count]
                 else:
-                    cnt += len(group)
+                    count += len(group)
             logging.error("Invalid index")
             return None
 
@@ -83,9 +83,9 @@ class FileViewerApp(QMainWindow):
         self.image_labels = {}  # 存储图片标签
 
         # 图片显示宽度
-        self.img_width = 256
+        self.img_width = 128
         # 图片显示高度
-        self.img_height = 256
+        self.img_height = 128
         # 图片排列水平间距
         self.img_horizontal_spacing = 2
         # grid竖直间距
@@ -93,33 +93,33 @@ class FileViewerApp(QMainWindow):
         # 图片名字高度
         self.label_height = 24
         # 组标题高度
-        self.title_height = 0
+        self.title_height = 50
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.handle_img_viewport_change)  # 连接超时信号到处理函数
         # 监听文件夹的变化
         self.watcher = QFileSystemWatcher()
-        self.initUI()
+        self.init_ui()
 
         if default_directory and os.path.exists(default_directory) and os.path.isdir(default_directory):
             self.load_dir(default_directory)
 
-    def initUI(self):
+    def init_ui(self):
         # 初始化用户界面
         self.setWindowTitle(self.title)
         self.setGeometry(self.left, self.top, self.width, self.height)
 
         widget = QWidget()
         self.setCentralWidget(widget)
-        vLayout = QVBoxLayout()
+        v_layout = QVBoxLayout()
 
-        hLayout = QHBoxLayout()
+        h_layout = QHBoxLayout()
         self.entry_directory = QLineEdit()
         self.entry_directory.setPlaceholderText("请输入或选择一个目录...")
         self.btn_open = QPushButton('打开目录')
         self.btn_open.clicked.connect(self.open_directory)
-        hLayout.addWidget(self.entry_directory)
-        hLayout.addWidget(self.btn_open)
+        h_layout.addWidget(self.entry_directory)
+        h_layout.addWidget(self.btn_open)
 
         self.file_list = QListWidget()
         self.file_list.itemClicked.connect(self.display_file_content)
@@ -143,9 +143,13 @@ class FileViewerApp(QMainWindow):
         splitter.addWidget(self.scroll_area)
         splitter.setSizes([280, 1000])
 
-        vLayout.addLayout(hLayout)
-        vLayout.addWidget(splitter)
-        widget.setLayout(vLayout)
+        v_layout.addLayout(h_layout)
+        v_layout.addWidget(splitter)
+        self.status_bar = QLabel("this is status bar")
+        self.status_bar.setFixedHeight(15)
+        self.status_bar.setAlignment(Qt.AlignRight)
+        v_layout.addWidget(self.status_bar)
+        widget.setLayout(v_layout)
 
     def open_directory(self):
         # 打开目录并更新文件列表
@@ -165,6 +169,7 @@ class FileViewerApp(QMainWindow):
             logging.error(f"Invalid directory: {directory}")
 
     def populate_files_list(self, directory):
+        logging.debug(f"Populating files list: {directory}")
         # 填充文件列表
         self.file_list.clear()
         files = [f for f in os.listdir(directory) if f.endswith('.txt')]
@@ -192,20 +197,21 @@ class FileViewerApp(QMainWindow):
             return False
 
     def display_file_content(self, item):
+        logging.debug(f"Displaying file content: {item}")
         if item is None:
             self.clear_layout(self.image_layout)  # 清理布局
             placeholder = QLabel("当前未选择文件")
             self.image_layout.addWidget(placeholder)  # 显示提示信息
             return
         # 显示文件内容和相关图像
-        filepath = os.path.join(self.current_directory, item.text(),) + '.txt'
-        try:
-            self.descriptor = ImageDescriptor.deserialize(filepath)
-            self.current_selected_file = item.text()
+        filepath = os.path.join(self.current_directory, item.text()) + '.txt'
+        # try:
+        self.descriptor = ImageDescriptor.deserialize(filepath)
+        self.current_selected_file = item.text()
 
-            self.update_image_display()
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"无法解析描述文件 {filepath}, 错误新消息：{e}")
+        self.update_image_display()
+        # except Exception as e:
+            # QMessageBox.critical(self, "错误", f"无法解析描述文件 {filepath}, 错误新消息：{e}")
 
     def img_display_vertical_pos(self, img_idx):
         """
@@ -217,54 +223,65 @@ class FileViewerApp(QMainWindow):
             logging.error("No descriptor to calculate image display vertical position")
             return float('inf')
         num_columns = max(1, self.scroll_area.viewport().width() // (self.img_width + self.img_horizontal_spacing))
-        logging.debug(colored(f"Number of columns: {num_columns}", "blue"))
+        # logging.debug(colored(f"Number of columns: {num_columns}", "blue"))
         v_pos = 0
-        cnt = 0
+        count = 0
         row_height = self.img_height + self.grid_vertical_spacing * 2 + self.label_height
         for group_img_num in self.descriptor.img_num:
             v_pos += self.title_height + self.grid_vertical_spacing
-            if cnt + group_img_num > img_idx:
-                return v_pos + ((img_idx - cnt) // num_columns) * row_height
-            cnt += group_img_num
-            v_pos += ((group_img_num + 1) // num_columns) * row_height
+            if count + group_img_num > img_idx:
+                return v_pos + ((img_idx - count) // num_columns) * row_height
+            count += group_img_num
+            v_pos += ((group_img_num - 1) // num_columns + 1) * row_height
             
         # 传入的img_idx超过当前描述文件记录的图片数量
         return float('inf')
     
     def update_image_display(self):
         # 更新图像显示区域
-
+        logging.debug("Updating image display")
         if self.descriptor is None:
             logging.error("No descriptor to update image display")
             return
 
-        logging.debug(f"Updating image display, unique images: {len(self.descriptor.unique_images)}, similar groups: {len(self.descriptor.similar_groups)}")
         self.clear_layout(self.image_layout)
-        row, col = 0, 0
+        self.image_labels = {}
         num_columns = max(1, self.scroll_area.viewport().width() // (self.img_width + self.img_horizontal_spacing))
-        logging.debug(colored(f"Number of columns: {num_columns}", "yellow"))
-        logging.debug(f"Number of columns: {num_columns}")
 
-        for idx, filename in enumerate(self.descriptor.unique_images):
-            img_label = QLabel()
-            img_label.setFixedSize(self.img_width, self.img_height)
-            img_label.setStyleSheet("background-color: gray")  # 灰色占位图
-            txt_label = QLabel(filename.stem)
-            txt_label.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-            txt_label.setFixedHeight(self.label_height)
-            self.image_layout.addWidget(img_label, row, col)
-            self.image_layout.addWidget(txt_label, row + 1, col)
-            self.image_labels[idx] = img_label
+        def display_image_group(title, images, start_image_idx, start_row):
+            title_label = QLabel(title)
+            title_label.setFixedHeight(self.title_height)
+            title_label.setFont(QFont("Arial", 20, QFont.Bold))
+            self.image_layout.addWidget(title_label, start_row, 0)
+            row = start_row + 1
+            col = 0
+            for idx, filename in enumerate(images):
+                img_label = QLabel()
+                img_label.setFixedSize(self.img_width, self.img_height)
+                img_label.setStyleSheet("background-color: gray")  # 灰色占位图
+                txt_label = QLabel(f"[{start_image_idx + idx}]{filename.stem} {self.img_display_vertical_pos(start_image_idx + idx)}")
+                txt_label.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+                txt_label.setFixedHeight(self.label_height)
+                self.image_layout.addWidget(img_label, row, col)
+                self.image_layout.addWidget(txt_label, row + 1, col)
+                self.image_labels[start_image_idx + idx] = img_label
 
-            col += 1
-            if col >= num_columns:
-                row += 2  # 为文件名标签留出空间
-                col = 0
+                col += 1
+                if col >= num_columns:
+                    row += 2  # 为文件名标签留出空间
+                    col = 0
+            return start_image_idx + len(images), start_row + ((len(images) - 1) // num_columns + 1) * 2 + 1
+
+        image_idx, row = display_image_group("唯一图片", list(self.descriptor.unique_images), 0, 0)
+        for group_idx, images in enumerate(self.descriptor.similar_groups):
+            image_idx, row = display_image_group(f"重复图片组 {group_idx + 1}", images, image_idx, row)
+            # logging.debug(colored(f"group_idx: {group_idx}, images: {len(images)} Image index: {image_idx}, row: {row}", "yellow"))
 
         logging.debug("图片标签准备完成")
+
         self.timer.start(self.view_refresh_throttling)  # 启动定时器重新调整布局
 
-    def loadVisibleImages(self):
+    def lazy_load_and_unload_imgs(self):
         """
         加载可见图片，卸载不可见图片
         """
@@ -279,11 +296,11 @@ class FileViewerApp(QMainWindow):
             loaded = pixmap is not None and not pixmap.isNull()
             file_path = os.path.join(self.current_directory, self.descriptor.file_by_idx(img_idx))
             if visible and not loaded:
-                logging.debug(f"加载图片：{file_path}")
+                logging.debug(colored(f"加载图片：{file_path}", "green"))
                 pixmap = QPixmap(file_path).scaled(self.img_width, self.img_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 label.setPixmap(pixmap)
             if not visible and loaded:
-                logging.debug(f"卸载图片：{file_path}")
+                logging.debug(colored(f"卸载图片：{file_path}", "yellow"))
                 label.setPixmap(QPixmap())
 
     def directory_changed(self, path):
@@ -293,14 +310,15 @@ class FileViewerApp(QMainWindow):
 
     def scrollbar_value_changed(self):
         self.timer.start(self.view_refresh_throttling)  # 启动定时器重新调整布局
+        self.status_bar.setText(f"滚动条位置：{self.scroll_area.verticalScrollBar().value()}")
 
-    def resizeEvent(self, event):
+    def resize_event(self, event):
         # todo 窗口宽度改变时，重新设置图片grid的布局。
         super().resizeEvent(event)
         self.timer.start(self.view_refresh_throttling)  # 启动定时器重新调整布局
 
     def handle_img_viewport_change(self):
-        self.loadVisibleImages()  # 重新加载可见图片
+        self.lazy_load_and_unload_imgs()  # 重新加载可见图片
         self.timer.stop()
 
     def clear_layout(self, layout):
@@ -312,7 +330,7 @@ class FileViewerApp(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    ex = FileViewerApp("/Users/chenweichu/dev/data/test")
-    # ex = FileViewerApp("/Volumes/192.168.1.173/pic/鞠婧祎_4999[5_GB]/thumbnail")
+    # ex = FileViewerApp("/Users/chenweichu/dev/data/test")
+    ex = FileViewerApp("/Volumes/192.168.1.173/pic/鞠婧祎_4999[5_GB]/thumbnail")
     ex.show()
     sys.exit(app.exec_())
