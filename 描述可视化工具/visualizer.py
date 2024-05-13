@@ -14,15 +14,15 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 
 class ImageDescriptor:
     # 初始化图像描述器
-    def __init__(self, unique_images, similar_groups, similar_groups_flg):
+    def __init__(self, unique_images, similar_groups, similar_groups_flg, new_unique_images):
         if len(similar_groups) != len(similar_groups_flg):
             raise ValueError(f"Similar groups and flags must have the same length, len of similar_groups: {len(similar_groups)}, len of similar_groups_flg: {len(similar_groups_flg)}")
         self.unique_images = set(unique_images)
         self.similar_groups = similar_groups
         self.similar_groups_flg = similar_groups_flg
+        self.new_unique_images = new_unique_images
         self.img_num = [len(unique_images)] + [len(sub_array) for sub_array in similar_groups]
 
-    # 从文件反序列化图像描述器
     @classmethod
     def deserialize(cls, filepath):
         with open(filepath, 'r') as file:
@@ -30,14 +30,15 @@ class ImageDescriptor:
         lines = content.split('\n')
         if not lines[0].startswith("Unique Images:"):
             raise ValueError("Not a valid descriptor file")
-        
+
         unique_images = []
         similar_groups = []
         similar_groups_flg = []
+        new_unique_images = []
         current_group = []
         current_group_flg = ""
         parsing_mode = 'unique'
-        
+
         for line in lines[1:]:
             if line.startswith("Similar Groups:"):
                 parsing_mode = 'groups'
@@ -48,7 +49,10 @@ class ImageDescriptor:
                     similar_groups_flg.append(current_group_flg)
                 current_group = []
                 current_group_flg = line.split(':')[1].strip()
-                print(colored(f"Group flg: [{current_group_flg}]", 'yellow'))
+                # print(colored(f"Group flag: [{current_group_flg}]", 'yellow'))
+                continue
+            elif line.startswith("New unique Images by next detector:"):
+                parsing_mode = 'new_unique'
                 continue
             elif line.strip():
                 image_path = line.strip()
@@ -56,12 +60,14 @@ class ImageDescriptor:
                     unique_images.append(image_path)
                 elif parsing_mode == 'groups':
                     current_group.append(image_path)
+                elif parsing_mode == 'new_unique':
+                    new_unique_images.append(image_path)
 
         if current_group:
             similar_groups.append(current_group)
             similar_groups_flg.append(current_group_flg)
-        
-        return cls(unique_images, similar_groups, similar_groups_flg)
+
+        return cls(unique_images, similar_groups, similar_groups_flg, new_unique_images)
     
     def file_by_idx(self, idx):
         # 根据索引获取文件
@@ -104,6 +110,7 @@ class DescripterViewer(QMainWindow):
         self.txt_fileslist_hash = ''
         self.descriptor = None
         self.loaded_descripter_path = {}
+        self.mapping_file_lines = {}
         # 待载入队列
         self.load_queue = deque()
         self.reset_runtime_status()
@@ -223,12 +230,30 @@ class DescripterViewer(QMainWindow):
             self.watcher.addPath(directory)
             self.watcher.directoryChanged.connect(self.directory_changed)
             self.populate_files_list(directory)
+            self.load_mappings()
         else:
             logging.error(f"Invalid directory: {directory}")
 
+    def load_mappings(self):
+        self.mapping_file_lines = None
+        if self.mapping_file_lines is None:
+            mapping_file_path = os.path.join(self.current_directory, "mapping.txt")
+            self.mapping_file_lines = {}
+            try:
+                with open(mapping_file_path, 'r') as file:
+                    for line in file:
+                        clean_line = line.strip()
+                        parts = clean_line.split('*')
+                        if len(parts) >= 2:
+                            self.mapping_file_lines[parts[1]] = parts[0]
+            except FileNotFoundError:
+                logging.error("Mapping file not found.")
+            except Exception as e:
+                logging.error(f"Failed to read mapping file: {e}")
+
     def populate_files_list(self, directory):
         logging.debug(f"Populating files list: {directory}")
-        files = [f for f in os.listdir(directory) if f.endswith('.txt')]
+        files = sorted([f for f in os.listdir(directory) if f.endswith('.txt')], key=lambda f: os.path.getmtime(os.path.join(directory, f)))
         fileshash = hash(tuple(files))
         if fileshash == self.txt_fileslist_hash:
             logging.debug("Files list is unchanged, skipping update.")
@@ -244,7 +269,7 @@ class DescripterViewer(QMainWindow):
                 detector = parts[2]
                 time_part = parts[3]
                 # 从时间部分提取小时和分钟
-                hour_minute = time_part[10:14]  # 索引10到13对应小时和分钟
+                hour_minute = time_part[8:12]  # 索引10到13对应小时和分钟
                 # 组合为目标格式
                 return f"[{idx}]{detector} {hour_minute}"
             except Exception as e:
@@ -292,7 +317,7 @@ class DescripterViewer(QMainWindow):
         try:
             self.descriptor = ImageDescriptor.deserialize(filepath)
             self.current_selected_file = item.text()
-            self.status_label.setText(f"唯一图片: {len(self.descriptor.unique_images)} | 相似组: {len(self.descriptor.similar_groups)}")
+            self.status_label.setText(f"唯一图片: {len(self.descriptor.unique_images)} | 相似组: {len(self.descriptor.similar_groups)} | 后一判断器新增唯一图片: {len(self.descriptor.new_unique_images)}")
             self.construct_img_layout_structure()
         except Exception as e:
             self.status_label.setText(f"解析描述文件出错: {e}")
@@ -344,7 +369,7 @@ class DescripterViewer(QMainWindow):
         self.reset_runtime_status()
         self.num_columns = max(1, self.img_viewport_width() // (self.img_width + self.img_horizontal_spacing))
 
-        def display_image_group(title, images, start_image_idx, removed=False):
+        def display_image_group(title, images, start_image_idx, new_unique_images = [], removed=False):
             title_label = QLabel(title)
             title_label.setFixedHeight(self.title_height)
             title_label.setFont(QFont("Arial", 20, QFont.Bold))
@@ -368,6 +393,7 @@ class DescripterViewer(QMainWindow):
                 txt_label.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
                 txt_label.setFixedHeight(self.label_height)
                 txt_label.setFixedWidth(self.img_width)
+                if filename in new_unique_images: txt_label.setStyleSheet("QLabel { color : yellow; }")
                 grid_layout.addWidget(img_label, row, col)
                 grid_layout.addWidget(txt_label, row + 1, col)
                 self.image_labels[start_image_idx + idx] = img_label
@@ -393,7 +419,7 @@ class DescripterViewer(QMainWindow):
         for group_idx, images in enumerate(self.descriptor.similar_groups):
             image_idx, vertical_size = display_image_group(
                 f"重复图片组 {group_idx + 1} [{len(images)}]",
-                images, image_idx,
+                images, image_idx, self.descriptor.new_unique_images,
                 self.descriptor.similar_groups_flg[group_idx] is not ""
                 )
             vertical_pos += vertical_size
@@ -458,20 +484,14 @@ class DescripterViewer(QMainWindow):
 
     def open_original_image(self, thumbnail_name):
         logging.debug(f"打开原图: {thumbnail_name}")
-        mapping_file_path = os.path.join(self.current_directory, "mapping.txt")
-        try:
-            with open(mapping_file_path, 'r') as file:
-                for line in file:
-                    # 去除每行末尾的空白符，这包括'\n'
-                    clean_line = line.strip()
-                    if clean_line.split('*')[1] == thumbnail_name:
-                        # 返回'*'分割后的第一个部分，假设存在，且防止空行造成的影响
-                        original_file_path = clean_line.split('*')[0]
-                        QDesktopServices.openUrl(QUrl.fromLocalFile(original_file_path))
-                        return
-        except Exception as e:
-            logging.error(f"Failed to read mapping file: {e}")
-            return
+        if self.mapping_file_lines is None:
+            self.load_mappings()
+        
+        orig_file_path = self.mapping_file_lines.get(thumbnail_name)
+        if orig_file_path:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(orig_file_path))
+        else:
+            logging.info(f"No mapping found for {thumbnail_name}")
 
     def directory_changed(self, path):
         # 目录变更处理
@@ -540,8 +560,8 @@ class DescripterViewer(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    ex = DescripterViewer("/Users/chenweichu/dev/data/test_副本")
-    # ex = DescripterViewer("/Volumes/192.168.1.173/pic/陈都灵_503[167_MB]")
+    # ex = DescripterViewer("/Users/chenweichu/dev/data/test_副本")
+    ex = DescripterViewer("/Volumes/192.168.1.173/pic/陈都灵_503[167_MB]")
     # ex = DescripterViewer("/Volumes/192.168.1.173/pic/鞠婧祎_4999[5_GB]")
 
     ex.show()

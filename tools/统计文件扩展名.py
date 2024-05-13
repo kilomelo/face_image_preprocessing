@@ -18,6 +18,7 @@ def count_extensions(directory):
         if 'thumbnail' in dirs:
             dirs.remove('thumbnail')  # 忽略thumbnail目录
         for file in files:
+            if file.startswith('.'): continue
             ext = Path(file).suffix.lower()  # 获取文件扩展名并转为小写
             extension_count[ext] += 1
             total_files += 1
@@ -57,4 +58,6 @@ def main(directory):
         tqdm.write(f"扩展名 '{ext}': {count} 个文件")
 
 directory = "/Volumes/192.168.1.173/pic/陈都灵_501[167_MB]"
+directory = "/Users/chenweichu/dev/data/test_副本"
+
 main(directory)
