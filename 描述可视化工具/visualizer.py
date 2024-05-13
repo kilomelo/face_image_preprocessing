@@ -15,6 +15,8 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 class ImageDescriptor:
     # 初始化图像描述器
     def __init__(self, unique_images, similar_groups, similar_groups_flg):
+        if len(similar_groups) != len(similar_groups_flg):
+            raise ValueError(f"Similar groups and flags must have the same length, len of similar_groups: {len(similar_groups)}, len of similar_groups_flg: {len(similar_groups_flg)}")
         self.unique_images = set(unique_images)
         self.similar_groups = similar_groups
         self.similar_groups_flg = similar_groups_flg
@@ -57,6 +59,7 @@ class ImageDescriptor:
 
         if current_group:
             similar_groups.append(current_group)
+            similar_groups_flg.append(current_group_flg)
         
         return cls(unique_images, similar_groups, similar_groups_flg)
     
@@ -97,6 +100,8 @@ class DescripterViewer(QMainWindow):
         self.view_refresh_throttling = 200
         self.current_directory = ''
         self.current_selected_file = None
+        # 描述当前载入目录中txt文件的情况，用以对目录变更逻辑进行节流
+        self.txt_fileslist_hash = ''
         self.descriptor = None
         self.loaded_descripter_path = {}
         # 待载入队列
@@ -223,25 +228,31 @@ class DescripterViewer(QMainWindow):
 
     def populate_files_list(self, directory):
         logging.debug(f"Populating files list: {directory}")
+        files = [f for f in os.listdir(directory) if f.endswith('.txt')]
+        fileshash = hash(tuple(files))
+        if fileshash == self.txt_fileslist_hash:
+            logging.debug("Files list is unchanged, skipping update.")
+            return
+        self.txt_fileslist_hash = fileshash
 
         def human_readable_name(file_name):
             """将字节转换为更易读的格式。"""
             try:
                 # 分割字符串，获取中间的部分（somestr）和时间部分
                 parts = file_name.split("_")
-                detector = parts[1]
-                time_part = parts[2]
+                idx = parts[1]
+                detector = parts[2]
+                time_part = parts[3]
                 # 从时间部分提取小时和分钟
                 hour_minute = time_part[10:14]  # 索引10到13对应小时和分钟
                 # 组合为目标格式
-                return f"{hour_minute} {detector}"
+                return f"[{idx}]{detector} {hour_minute}"
             except Exception as e:
                 logging.error(f"转换可读名字失败: {e}")
                 return file_name
         # 填充文件列表
         self.file_list.clear()
         self.loaded_descripter_path = {}
-        files = [f for f in os.listdir(directory) if f.endswith('.txt')]
         descriptor_files = [f for f in files if self.is_descriptor_file(os.path.join(directory, f))]
         current_select_found = False
         for file in descriptor_files:
@@ -333,10 +344,11 @@ class DescripterViewer(QMainWindow):
         self.reset_runtime_status()
         self.num_columns = max(1, self.img_viewport_width() // (self.img_width + self.img_horizontal_spacing))
 
-        def display_image_group(title, images, start_image_idx):
+        def display_image_group(title, images, start_image_idx, removed=False):
             title_label = QLabel(title)
             title_label.setFixedHeight(self.title_height)
             title_label.setFont(QFont("Arial", 20, QFont.Bold))
+            if removed: title_label.setStyleSheet("QLabel { color : yellow; }")
             self.image_layout.addWidget(title_label)
             vertical_size = self.title_height + self.widgets_vertical_spacing
 
@@ -379,7 +391,11 @@ class DescripterViewer(QMainWindow):
         image_idx, vertical_pos = display_image_group("唯一图片", list(self.descriptor.unique_images), 0)
         self.group_scroll_vpos.append(vertical_pos)
         for group_idx, images in enumerate(self.descriptor.similar_groups):
-            image_idx, vertical_size = display_image_group(f"重复图片组 {group_idx + 1} [{len(images)}]", images, image_idx)
+            image_idx, vertical_size = display_image_group(
+                f"重复图片组 {group_idx + 1} [{len(images)}]",
+                images, image_idx,
+                self.descriptor.similar_groups_flg[group_idx] is not ""
+                )
             vertical_pos += vertical_size
             self.group_scroll_vpos.append(vertical_pos)
 
@@ -441,16 +457,18 @@ class DescripterViewer(QMainWindow):
                 break
 
     def open_original_image(self, thumbnail_name):
+        logging.debug(f"打开原图: {thumbnail_name}")
         mapping_file_path = os.path.join(self.current_directory, "mapping.txt")
         try:
             with open(mapping_file_path, 'r') as file:
                 for line in file:
                     # 去除每行末尾的空白符，这包括'\n'
                     clean_line = line.strip()
-                    if clean_line.endswith(thumbnail_name):
+                    if clean_line.split('*')[1] == thumbnail_name:
                         # 返回'*'分割后的第一个部分，假设存在，且防止空行造成的影响
                         original_file_path = clean_line.split('*')[0]
                         QDesktopServices.openUrl(QUrl.fromLocalFile(original_file_path))
+                        return
         except Exception as e:
             logging.error(f"Failed to read mapping file: {e}")
             return
@@ -522,8 +540,8 @@ class DescripterViewer(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    # ex = FileViewerApp("/Users/chenweichu/dev/data/test")
-    ex = DescripterViewer("/Volumes/192.168.1.173/pic/陈都灵_503[167_MB]")
+    ex = DescripterViewer("/Users/chenweichu/dev/data/test_副本")
+    # ex = DescripterViewer("/Volumes/192.168.1.173/pic/陈都灵_503[167_MB]")
     # ex = DescripterViewer("/Volumes/192.168.1.173/pic/鞠婧祎_4999[5_GB]")
 
     ex.show()

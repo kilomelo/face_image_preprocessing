@@ -2,92 +2,203 @@
 你的代码质量很高，可读性强，易于维护，遵循了良好的代码规范，有详细的注释（主要以中文书写）。
 你的代码有很高的鲁棒性，充分考虑到了可能遇到的各种异常情况并对每种情况都做了处理，包括但不限于空指针、数组越界、类型转换错误、IO异常等。
 你的代码在性能方面也有良好的表现，能够高效地处理大量数据。
-你的代码在各个关键步骤上都有日志输出，以便在出现问题时能够快速定位问题。
 
 你将根据我提出的需求，编写一段代码，并确保这段代码符合上述要求。
 
-你编写这段代码的最终目的（需求）是：
-
+这是需求，包括过往历次迭代的需求记录：
 [[[
-编写一个带图形界面的工具，这个工具可以显示出一个文件夹下的所有图片文件。
-工具界面布局如下：
-上下布局，上部是一个目录输入框，下部是图片显示区域
-目录输入框右侧有个按钮可以选择打开哪个目录，当前打开的目录路径会在目录输入框里显示。
-
-图片显示区域显示目录里的所有图片，按以下规则：
-    a、首先显示一个居左的标题，文字是:"所有图片"
-    a、图片按矩阵排列，每行个数根据窗口大小计算。
-    c、图片采用懒加载。只有当图片在视图范围内时，才加载并显示，否则显示一个256×256的占位图形。需要注意的是显，当示区域滚动时，图片的显示状态可能会发生变化。
-    b、图片左上角需要显示图片文件名称（不包括扩展名）
-
-图片显示区域会在其内容超过当前视图高度时显示滚动条，可以滚动查看。
-
-工具需要使用python编写，使用Qt作为ui框架，Matplotlib作为图片处理和显示工具。
+编写一个查看descripter的工具，这个工具以矩阵的方式展示描述器里记录的图像文件，这些文件在描述器记录文件的同级目录下。
+此次修改的新需求:
+    [[
+    按照目前已经实现的代码中的todo补全代码
+    ]]
 ]]]
 
-这是部分已实现的代码：
+这是目前已实现的代码：
+
 [[[
-import sys
+# 迭代编号：4
+from PIL import Image
+import numpy as np
+import cv2
 import os
-import logging
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QScrollArea, QLabel, QGridLayout
-from PyQt5.QtCore import Qt
+from pathlib import Path
+from imagehash import phash
+from itertools import combinations
+from typing import List, Set, Tuple
+from termcolor import colored
+import datetime
+from tqdm import tqdm
 
-# 配置日志
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+class ImageDescriptor:
+    def __init__(self, unique_images: Set[Path], similar_groups: List[List[Path]]):
+        self.unique_images = unique_images
+        self.similar_groups = similar_groups
+        # tqdm.write(colored(f"ImageDescripter constructed: {[len(unique_images)] + [len(sub_array) for sub_array in similar_groups]}", "white"))
 
-class ImageGallery(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.initUI()
+    def serialize(self, filepath: str):
+        """将描述信息保存为文本文件"""
+        tqdm.write(colored(f"Saving description to {filepath}", "white"))
+        with open(filepath, 'w') as file:
+            file.write("Unique Images:\n")
+            for image in self.unique_images:
+                file.write(f"{image.name}\n")
+            file.write("\nSimilar Groups:\n")
+            for group in self.similar_groups:
+                file.write(f"Group:\n")
+                for image in group:
+                    file.write(f"{image.name}\n")
+                file.write("\n")
 
-    def initUI(self):
-        # 主布局
-        mainLayout = QVBoxLayout()
-        self.setLayout(mainLayout)
+class HashDetector:
+    def __init__(self, precision: int):
+        self.precision = precision
 
-        # 顶部布局：目录输入与选择按钮
-        topLayout = QHBoxLayout()
-        mainLayout.addLayout(topLayout)
-        self.directoryInput = QLineEdit()
-        self.directoryInput.setPlaceholderText("请输入或选择一个目录...")
-        topLayout.addWidget(self.directoryInput)
-        self.openButton = QPushButton("打开")
-        self.openButton.clicked.connect(self.openDirectory)
-        topLayout.addWidget(self.openButton)
+    def detect(self, images: List[Path]) -> ImageDescriptor:
+        # tqdm.write(colored(f"Detecting duplicates using perceptual hash, precision: {self.precision}\nimages cnt: {len(images)}", "white"))
+        hash_dict = {}
+        
+        # 添加tqdm进度条
+        for image_path in tqdm(images, desc="Hashing images"):
+            try:
+                with Image.open(image_path) as img:
+                    # 计算图片的perceptual hash
+                    img_hash = phash(img.convert("L").resize((self.precision, self.precision)))
+                    if img_hash in hash_dict:
+                        hash_dict[img_hash].append(image_path)
+                    else:
+                        hash_dict[img_hash] = [image_path]
+            except Exception as e:
+                tqdm.write(colored(f"Error processing {image_path}: {e}", "red"))
+                    
+        tqdm.write(colored(f"Found {len(hash_dict)} unique hashes", "white"))
+        unique_images = set()
+        similar_groups = []
+        
+        # 添加tqdm进度条
+        for paths in tqdm(hash_dict.values(), desc="Grouping images"):
+            if len(paths) == 1:
+                unique_images.add(paths[0])
+            else:
+                similar_groups.append(paths)
+                
+        tqdm.write(colored(f"Found {len(unique_images)} unique images, {len(similar_groups)} similar groups", "white"))
+        return ImageDescriptor(unique_images, similar_groups)
 
-        # 图片显示区域
-        self.scrollArea = QScrollArea()
-        self.scrollArea.setWidgetResizable(True)
-        mainLayout.addWidget(self.scrollArea)
+class ORBDetector:
+    def __init__(self, nfeatures: int, threshold: float):
+        self.nfeatures = nfeatures
+        self.threshold = threshold
 
-        self.imageContainer = QWidget()
-        self.imageLayout = QGridLayout()
-        self.imageContainer.setLayout(self.imageLayout)
-        self.scrollArea.setWidget(self.imageContainer)
+    def detect(self, images: List[Path]) -> ImageDescriptor:
+        # tqdm.write(colored(f"Detecting duplicates using ORB, nfeatures: {self.nfeatures}, threshold: {self.threshold}, images cnt: {len(images)}", "white"))
+        keypoints_dict = {img: self._extract_features(img) for img in images}
+        similar_groups = []
+        unique_images = set(images)
+        
+        # 直接计算组合数，而不生成组合列表
+        combines = combinations(images, 2)
+        
+        # 使用tqdm直接包装组合迭代器
+        # for img1, img2 in tqdm(combines, total=len(images) * (len(images) - 1) // 2, desc="Matching features"):
+        for img1, img2 in combines:
+            kp1, des1 = keypoints_dict[img1]
+            kp2, des2 = keypoints_dict[img2]
+            if des1 is not None and des2 is not None:
+                if self._match_features(des1, des2) > self.nfeatures * self.threshold:
+                    similar_groups.append([img1, img2])
+                    unique_images.discard(img1)
+                    unique_images.discard(img2)
 
-        self.setWindowTitle('图片浏览器')
-        self.setGeometry(100, 100, 800, 600)
-        self.show()
+        return ImageDescriptor(unique_images, similar_groups)
 
-    def openDirectory(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "选择文件夹")
-        if dir_path:
-            self.directoryInput.setText(dir_path)
-            self.loadImages(dir_path)
+    def _extract_features(self, image_path: Path):
+        orb = cv2.ORB_create(self.nfeatures)
+        img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+        return orb.detectAndCompute(img, None)
 
-    def loadImages(self, dir_path):
-        # 还未实现。
-        return
+    def _match_features(self, des1, des2):
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = bf.match(des1, des2)
+        return len(matches)
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    ex = ImageGallery()
-    sys.exit(app.exec_())
+class ImageDeduplicator:
+    def __init__(self, directory: str):
+        if not os.path.exists(directory) or not os.path.isdir(directory):
+            tqdm.write(colored(f"Directory {directory} not valid", "red"))
+            self.directory = None
+            return
+        thumbnail = Path(f"{directory}/thumbnail")
+        if not os.path.exists(thumbnail) or not os.path.isdir(thumbnail):
+            tqdm.write(colored(f"Directory {thumbnail} not valid, create thumbnails first", "red"))
+            self.directory = None
+            return
+        self.directory = directory
+        self.detectors = [
+            HashDetector(8),
+            HashDetector(16),
+            ORBDetector(500, 0.5),
+            ORBDetector(1000, 0.7)
+        ]
 
+    def deduplicate(self):
+
+        if self.directory is None:
+            tqdm.write(colored("Directory not valid", "red"))
+            return
+        thumbails = [file for file in Path(f"{self.directory}/thumbnail").glob('*') if not file.name.startswith('.') and file.suffix.lower() in [".jpg", ".png"]]
+        descriptor = ImageDescriptor(set(), [thumbails])
+
+        for detector in self.detectors:
+            tqdm.write(colored(f"Processed with {type(detector).__name__}[{id(detector)}], similar_groups count: {len(descriptor.similar_groups)}", "yellow"))
+            new_descripter = ImageDescriptor(descriptor.unique_images, [])
+            if isinstance(detector, ORBDetector):
+                for group_of_img in tqdm(descriptor.similar_groups):
+                    result = detector.detect(group_of_img)
+                    new_descripter.unique_images.update(result.unique_images)
+                    new_descripter.similar_groups.extend(result.similar_groups)
+            else:
+                for group_of_img in descriptor.similar_groups:
+                    result = detector.detect(group_of_img)
+                    new_descripter.unique_images.update(result.unique_images)
+                    new_descripter.similar_groups.extend(result.similar_groups)
+            descriptor = new_descripter
+            # 序列化待序列化的描述对象
+            timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            filepath = f"{self.directory}/descriptor_{type(detector).__name__}_{timestamp}.txt"
+            descriptor.serialize(filepath)
+            tqdm.write(colored(f"After processed, similar_groups count: {len(descriptor.similar_groups)}, unique count: {len(descriptor.unique_images)}\n", "yellow"))
+        
+        return descriptor
+
+# Example usage
+# deduplicator = ImageDeduplicator("/Users/chenweichu/dev/data/test_副本")
+deduplicator = ImageDeduplicator("/Volumes/192.168.1.173/pic/陈都灵_503[167_MB]")
+deduplicator = ImageDeduplicator("/Volumes/192.168.1.173/pic/鞠婧祎_4999[5_GB]")
+
+final_descriptor = deduplicator.deduplicate()
+if final_descriptor is None:
+    tqdm.write(colored("Deduplication failed", "red"))
+else:
+    tqdm.write(colored(f"Final unique images count: {len(final_descriptor.unique_images)}", "white"))
 ]]]
 
-给我展示你编写的最终代码，这段代码应当是完整可运行的。
-最终代码不应该包含任何省略或指向性注释。
-不应该包含类似于“...省略实现”、“...保持不变”、“与...相同”这样的注释来代替实际代码。
-代码中使用到的各个库均在开头进行过导入，运行时不会出现找不到库的问题。
+修改代码过程中严格遵守以下几条规则：
+1、禁止修改任何和新增需求无关的部分！
+2、所有的方法(method)需要添加详细的注释，包括方法功能，参数、返回值的解释。
+3、每一句代码都需要有注释，以提高代码的可读性。
+4、输出尽量多的日志，以使调试过程中能获取更多的状态信息，提高调试效率。
+5、禁止移除旧代码中的功能，除非这是上文中“此次修改的新需求”里明确要求的。
+6、禁止删除旧代码中被注释掉的代码。
+
+对于迭代编号的标注；
+1、旧代码的迭代编号见代码第一行。
+2、此次修改的迭代编号在旧代码中的迭代编号上加1。修改后的代码的第一行显示此次修改的迭代编号。
+3、此次迭代做出的每一处代码改动都需要用注释标注，标明此次修改的迭代编号。格式为：(改动描述) 迭代编号：(此次改动的迭代编号)。
+4、如果旧代码中有包含迭代编号的注释（非此次迭代编号），删除掉迭代编号，保留对代码解释的部分。
+
+最后，展示修改后用于的完整代码，完整代码应该严格满足以下要求：
+1、是可运行的。
+2、包含此次修改的部分和未修改的部分。
+3、不包含任何省略或指向性注释。
+4、不应该包含类似于“...省略实现”、“...保持不变”、“与...相同”这样的注释来代替实际代码。
