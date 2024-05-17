@@ -57,7 +57,7 @@ def main(directory):
     for ext, count in sorted(extension_count.items()):
         tqdm.write(f"扩展名 '{ext}': {count} 个文件")
 
-directory = "/Volumes/192.168.1.173/pic/陈都灵_501[167_MB]"
-directory = "/Users/chenweichu/dev/data/test_副本"
+directory = "/Volumes/192.168.1.173/pic/热巴_6654[53_GB]"
+# directory = "/Users/chenweichu/dev/data/test_副本"
 
 main(directory)
