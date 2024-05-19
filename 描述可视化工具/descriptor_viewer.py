@@ -163,7 +163,7 @@ class DescripterViewer(QMainWindow):
                         if len(parts) >= 2:
                             self.mapping_file_lines[parts[1]] = parts[0]
             except FileNotFoundError:
-                logging.error("Mapping file not found.")
+                logging.error(f"Mapping file {mapping_file_path} not found.")
             except Exception as e:
                 logging.error(f"Failed to read mapping file: {e}")
 

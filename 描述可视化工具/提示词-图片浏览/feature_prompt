@@ -7,389 +7,211 @@
 
 这是需求，包括过往历次迭代的需求记录：
 [[[
-编写一个查看descripter的工具，这个工具以矩阵的方式展示描述器里记录的图像文件，这些文件在描述器记录文件的同级目录下。
-此次修改的新需求:
-    [[
-    按照目前已经实现的代码中的todo补全代码
-    ]]
+初始需求：((
+编写一个基于insightface的面部裁剪工具。传入一个列表，遍历目列表中的图片文件路径，识别出图片中的人脸，并将每个人脸裁剪到一张新图片中保存到磁盘上。
+insightface相关的参考代码：
+[[
+import cv2
+import numpy as np
+import insightface
+from insightface.app import FaceAnalysis
+from insightface.data import get_image as ins_get_image
+
+app = FaceAnalysis(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+app.prepare(ctx_id=0, det_size=(640, 640))
+img = ins_get_image('t1')
+faces = app.get(img)
+rimg = app.draw_on(img, faces)
+cv2.imwrite("./t1_output.jpg", rimg)
+]]
+维护一个从0开始的计数器，输出图片时，文件名为该计数器的自定义编码值，自定义编码方法如下：
+[[
+    def decimal_to_custom_base(n):
+        """将十进制数字转换为使用自定义非混淆字符集的基25字符串。"""
+        characters = 'acdefhjkmnpqrtuvwxyz23478'
+        base = len(characters)
+        if n == 0:
+            return characters[0]
+        result = ""
+        while n > 0:
+            n, remainder = divmod(n, base)
+            result = characters[remainder] + result
+        return result
+]]
+需传入一个目标目录，在目录下创建一个叫faces的目录，如果存在则删除重建。范例：
+[[
+    target_dir = Path(directory)
+    thumbnail_dir = target_dir / "thumbnail"
+    mapping_file_path = target_dir / "mapping.txt"
+
+    if not target_dir.is_dir():
+        tqdm.write(f"目录不存在: {directory}")
+        return
+
+    if thumbnail_dir.exists():
+        tqdm.write(f"删除已存在的缩略图目录: {thumbnail_dir}")
+        shutil.rmtree(thumbnail_dir, onerror=handle_remove_readonly)
+    thumbnail_dir.mkdir(parents=True, exist_ok=True)
+]]
+对于每一个输出的图片文件，创建一个同名的文本文件记录其人脸的信息（app.get返回的该张人脸的信息）
+使用一个列表记录每个输出图片与原始图片的对应关系，列表项为字符串，格式为：“输出图片文件名不包含扩展名*原始图片路径”
+任务完成时将这个列表序列化到文本文件里，文本文件名称为"face_mapping.txt"，保存到目标目录下。如果这个文件已存在，则删除重新创建。
+
+输出人脸图片时，裁剪范围要比app.get返回的人脸框大20%，以保证人脸完整。但裁剪范围不得超出原始图片范围。
+
+用一个tqdm的进度条来表示整个列表的处理情况。
+))
+迭代需求1(此次你需要实现的)：((
+一、增加代码，用于产生传入的图片列表，逻辑是：
+(
+1、读取一个文本文件A来获取一个图片名称的列表，A的格式类似于：
+Unique Images:
+qw.jpg
+xd.jpg
+k2.jpg
+xk.jpg
+
+Similar Groups:
+Group:
+hq.jpg
+h4.jpg
+
+Group:
+hr.jpg
+h7.jpg
+
+Group:
+hv.jpg
+je.jpg
+你只需要获得所有的Unique Images。
+
+2、A所在的目录下有一个‘thumbnail’目录，刚刚获取的unique images即是这个目录下的文件。也是要传入原来代码逻辑的图片文件列表。
+)
+二、修改裁剪图片的逻辑，原来检测传入的图片中人脸，并从传入的图片中裁剪。现在改为：检测及获取人脸信息逻辑不变，但从另一个传入图片对应的原始高清大图中裁剪。
+基于性能考虑，用于检测的图片均为从原始高清大图获取的灰度缩略图，缩略图和原始图片的对应关系这样获取：
+(
+上面提到的文本文件A所在的目录下有文本文件mapping.txt，格式类似于：
+/Volumes/192.168.1.173-1/pic/陈都灵_503[167_MB]/陈都灵黑白魅力写真大片/2.jpg*c
+/Volumes/192.168.1.173-1/pic/陈都灵_503[167_MB]/陈都灵黑白魅力写真大片/6.jpg*d
+/Volumes/192.168.1.173-1/pic/陈都灵_503[167_MB]/陈都灵黑白魅力写真大片/1.jpg*e
+其中*号前为原始图片路径，*号后为缩略图文件名。
+)
+你需要在用缩略图检测到人脸并获得人脸信息后，查找到缩略图对应的原始图片，打开来裁剪出用于输出的人脸图片。
+需要注意的是，缩略图和原始图片的尺寸关系存在一个转换，会影响到裁剪矩形的计算，可以参考生产缩略图的代码：
+(
+    img = Image.open(source_path)
+    img = rotate_image_according_to_exif(img)
+    if grayscale:
+        img = img.convert('L')
+    # 保持宽高比缩放
+    img.thumbnail((thumbnail_size, thumbnail_size), Image.LANCZOS)
+    # 创建一个白色背景的新图片
+    final_image = Image.new('RGB' if not grayscale else 'L', (thumbnail_size, thumbnail_size), 'white')
+    # 计算居中的起始坐标
+    x = (final_image.width - img.width) // 2
+    y = (final_image.height - img.height) // 2
+    # 将img贴在final_image的计算位置上
+    final_image.paste(img, (x, y))
+    final_image.save(target_path, format='JPEG', quality=85)
+)
+三、原来代码里face_mapping.txt保存的是用于检测的缩略图与输出的人脸图之间的关系，现在要改为原始图片与人脸图片之间的关系。
+四、原来代码中需要传入main的directory，就是A所在的目录。
+))
+
 ]]]
 
 这是目前已实现的代码：
 [[[
 # 迭代编号：1
-import sys
 import os
-import logging
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QScrollArea, QLabel, QGridLayout, QListWidget, QListWidgetItem, QWidget, QMessageBox
-from PyQt5.QtCore import Qt, QFileSystemWatcher
-from PyQt5 import QtWidgets
-from PyQt5.QtGui import QPixmap
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
+import errno
+import stat
+import cv2
+import numpy as np
+import shutil
+import insightface
+from insightface.app import FaceAnalysis
+from tqdm import tqdm
 from pathlib import Path
 
-# 配置日志
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+def handle_remove_readonly(func, path, exc):
+    """移除只读文件的异常处理函数。"""
+    excvalue = exc[1]
+    if func in (os.rmdir, os.unlink) and excvalue.errno == errno.EACCES:
+        os.chmod(path, stat.S_IRWXU)
+        func(path)
+    else:
+        raise
 
-class ImageDescriptor:
-    # 初始化图像描述器
-    def __init__(self, unique_images, similar_groups):
-        self.unique_images = set(unique_images)
-        self.similar_groups = similar_groups
+def decimal_to_custom_base(n):
+    """将十进制数字转换为使用自定义非混淆字符集的基25字符串。"""
+    characters = 'acdefhjkmnpqrtuvwxyz23478'
+    base = len(characters)
+    if n == 0:
+        return characters[0]
+    result = ""
+    while n > 0:
+        n, remainder = divmod(n, base)
+        result = characters[remainder] + result
+    return result
 
-    # 从文件反序列化图像描述器
-    @classmethod
-    def deserialize(cls, filepath):
-        with open(filepath, 'r') as file:
-            content = file.read()
-        lines = content.split('\n')
-        if not lines[0].startswith("Unique Images:"):
-            raise ValueError("Not a valid descriptor file")
-        
-        base_path = Path(filepath).parent
-        unique_images = []
-        similar_groups = []
-        current_group = []
-        parsing_mode = 'unique'
-        
-        for line in lines[1:]:
-            if line.startswith("Similar Groups:"):
-                parsing_mode = 'groups'
-                continue
-            elif line.startswith("Group:"):
-                if current_group:
-                    similar_groups.append(current_group)
-                current_group = []
-                continue
-            elif line.strip():
-                image_path = base_path / line.strip()
-                if parsing_mode == 'unique':
-                    unique_images.append(image_path)
-                elif parsing_mode == 'groups':
-                    current_group.append(image_path)
+def prepare_directory(directory):
+    """准备输出目录，确保目录存在且干净。"""
+    target_dir = Path(directory)
+    faces_dir = target_dir / "faces"
+    mapping_file_path = target_dir / "face_mapping.txt"
 
-        if current_group:
-            similar_groups.append(current_group)
-        
-        return cls(unique_images, similar_groups)
+    if not target_dir.is_dir():
+        tqdm.write(f"目录不存在: {directory}")
+        return None, None
 
-class FileViewerApp(QMainWindow):
-    def __init__(self, default_directory=None):
-        super().__init__()
-        self.title = '文件和图像浏览器'
-        self.left = 10
-        self.top = 10
-        self.width = 640
-        self.height = 480
-        self.current_directory = ''
-        self.current_selected_file = None
-        self.watcher = QFileSystemWatcher()
-        self.initUI()
+    if faces_dir.exists():
+        tqdm.write(f"删除已存在的人脸图片目录: {faces_dir}")
+        shutil.rmtree(faces_dir, onerror=handle_remove_readonly)
+    faces_dir.mkdir(parents=True, exist_ok=True)
 
-        if default_directory and os.path.exists(default_directory) and os.path.isdir(default_directory):
-            self.load_dir(default_directory)
+    if mapping_file_path.exists():
+        tqdm.write(f"删除已存在的映射文件: {mapping_file_path}")
+        mapping_file_path.unlink()
 
-    def initUI(self):
-        # 初始化用户界面
-        self.setWindowTitle(self.title)
-        self.setGeometry(self.left, self.top, self.width, self.height)
+    return faces_dir, mapping_file_path
 
-        widget = QWidget()
-        self.setCentralWidget(widget)
-        vLayout = QVBoxLayout()
+def process_images(image_paths, output_dir):
+    """处理图像列表中的每个图像，识别人脸并保存裁剪的人脸图像。"""
+    app = FaceAnalysis(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+    app.prepare(ctx_id=0, det_size=(640, 640))
+    face_mappings = []
+    expand_range = 0.2
+    for index, img_path in enumerate(tqdm(image_paths, desc="处理图片")):
+        img = cv2.imread(str(img_path))
+        faces = app.get(img)
+        for face_id, face in enumerate(faces):
+            bbox = face.bbox.astype(int)
+            x, y, x2, y2 = bbox
+            w, h = x2 - x, y2 - y
+            x, y = max(0, x - int(expand_range * 0.5 * w)), max(0, y - int(expand_range * 0.5 * h))
+            x2, y2 = min(img.shape[1], x2 + int(expand_range * 0.5 * w)), min(img.shape[0], y2 + int(expand_range * 0.5 * h))
+            cropped_face = img[y:y2, x:x2]
+            face_filename = decimal_to_custom_base(index * 100 + face_id) + ".jpg"
+            cv2.imwrite(str(output_dir / face_filename), cropped_face)
+            with open(str(output_dir / (face_filename[:-4] + ".txt")), 'w') as f:
+                f.write(str(face))
+            face_mappings.append(f"{face_filename[:-4]}*{img_path}")
+    return face_mappings
 
-        hLayout = QHBoxLayout()
-        self.entry_directory = QLineEdit()
-        self.entry_directory.setPlaceholderText("请输入或选择一个目录...")
-        self.btn_open = QPushButton('打开目录')
-        self.btn_open.clicked.connect(self.open_directory)
-        hLayout.addWidget(self.entry_directory)
-        hLayout.addWidget(self.btn_open)
+def save_mappings(mapping_file_path, mappings):
+    """保存映射到文件。"""
+    with open(mapping_file_path, 'w') as f:
+        for mapping in mappings:
+            f.write(mapping + "\n")
 
-        self.file_list = QListWidget()
-        self.file_list.itemClicked.connect(self.display_file_content)
-
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.image_container = QWidget()
-        self.scroll_area.setWidget(self.image_container)
-        self.image_layout = QGridLayout()
-        self.image_container.setLayout(self.image_layout)
-
-        # splitter = QHBoxLayout()
-        splitter = QtWidgets.QSplitter(Qt.Horizontal)
-        splitter.addWidget(self.file_list)
-        splitter.addWidget(self.scroll_area)
-        splitter.setSizes([200, 440])
-
-        vLayout.addLayout(hLayout)
-        vLayout.addWidget(splitter)
-        widget.setLayout(vLayout)
-
-    def open_directory(self):
-        # 打开目录并更新文件列表
-        directory = QFileDialog.getExistingDirectory(self, "选择文件夹", "")
-        self.load_dir(directory)
-
-    def load_dir(self, directory):
-        if directory and os.path.exists(directory) and os.path.isdir(directory):
-            self.entry_directory.setText(directory)
-            if self.current_directory:
-                self.watcher.removePath(self.current_directory)
-            self.current_directory = directory
-            self.watcher.addPath(directory)
-            self.watcher.directoryChanged.connect(self.directory_changed)
-            self.populate_files_list(directory)
-        else:
-            logging.error(f"Invalid directory: {directory}")
-
-    def populate_files_list(self, directory):
-        # 填充文件列表
-        self.file_list.clear()
-        files = [f for f in os.listdir(directory) if f.endswith('.txt')]
-        print(f"Found {len(files)} files in {directory}:")
-        descriptor_files = [f for f in files if self.is_descriptor_file(os.path.join(directory, f))]
-        print(f"Found {len(descriptor_files)} descriptor files:")
-        current_select_found = False
-        for file in descriptor_files:
-            item = QListWidgetItem(file)
-            self.file_list.addItem(item)
-            if file == self.current_selected_file:
-                self.file_list.setCurrentItem(item)
-                current_select_found = True
-        if not current_select_found:
-            self.current_selected_file = None
-            self.display_file_content(None)
-
-    def is_descriptor_file(self, filepath):
-        # 检查是否为描述文件
-        try:
-            with open(filepath, 'r') as file:
-                first_line = file.readline()
-                return "Unique Images:" in first_line
-        except Exception as e:
-            logging.error(f"Error checking descriptor file: {e}")
-            return False
-
-    def display_file_content(self, item):
-        if None == item:
-            #todo 清理self.image_container视图，并显示提示信息“当前未选择文件”
-            return
-        # 显示文件内容和相关图像
-        filepath = os.path.join(self.current_directory, item.text())
-        try:
-            descriptor = ImageDescriptor.deserialize(filepath)
-            self.current_selected_file = item.text()
-            self.update_image_display(descriptor)
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"无法解析文件: {e}")
-
-    def update_image_display(self, descriptor):
-        # 更新图像显示区域
-
-        print(f"Updating image display, unique images: {len(descriptor.unique_images)}, similar groups: {len(descriptor.similar_groups)}")
-        self.clear_layout(self.image_layout)
-        #todo 显示descriptor.unique_images列表里所有图片文件，显示方式见代码B，要求保留图片动态加载的逻辑
-
-    def directory_changed(self, path):
-        # 目录变更处理
-        if path == self.current_directory:
-            self.populate_files_list(path)
-
-    def clear_layout(self, layout):
-        # 清空布局中的所有控件
-        while layout.count():
-            child = layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    ex = FileViewerApp("/Users/chenweichu/dev/data/test")
-    # ex = ImageGallery("/Volumes/192.168.1.173/pic/鞠婧祎_4999[5_GB]/thumbnail")
-    ex.show()
-    sys.exit(app.exec_())
-
-]]]
-
-这是代码B：
-[[[
-    # 迭代编号：4
-from pathlib import Path
-import sys
-import os
-import logging
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QScrollArea, QLabel, QGridLayout, QSizePolicy
-from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt, QSize, QTimer, QFileSystemWatcher
-
-# 配置日志
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
-class ImageDescriptor:
-    def __init__(self, unique_images, similar_groups):
-        self.unique_images = set(unique_images)
-        self.similar_groups = similar_groups
-
-    @classmethod
-    def deserialize(cls, filepath):
-        with open(filepath, 'r') as file:
-            content = file.read()
-        lines = content.split('\n')
-        if not lines[0].startswith("Unique Images:"):
-            raise ValueError("Not a valid descriptor file")
-        
-        base_path = Path(filepath).parent
-        unique_images = []
-        similar_groups = []
-        current_group = []
-        parsing_mode = 'unique'
-        
-        for line in lines[1:]:
-            if line.startswith("Similar Groups:"):
-                parsing_mode = 'groups'
-                continue
-            elif line.startswith("Group:"):
-                if current_group:
-                    similar_groups.append(current_group)
-                current_group = []
-                continue
-            elif line.strip():
-                image_path = base_path / line.strip()
-                if parsing_mode == 'unique':
-                    unique_images.append(image_path)
-                elif parsing_mode == 'groups':
-                    current_group.append(image_path)
-
-        if current_group:
-            similar_groups.append(current_group)
-        
-        return cls(unique_images, similar_groups)
-
-class ImageGallery(QWidget):
-    def __init__(self, default_directory=None):
-        super().__init__()
-        self.spacing = 10  # 每个图片间的间隙
-        self.image_width = 128  # 图片宽度
-        self.image_height = 128  # 图片高度
-        self.label_height = 30 # 标签高度
-        self.image_files = {}  # 存储文件路径
-        self.image_labels = {}  # 存储图片标签
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.handleVisibilityChange)  # 连接超时信号到处理函数
-        self.watcher = QFileSystemWatcher()
-
-        self.initUI()  # 初始化用户界面
-
-        if default_directory and os.path.exists(default_directory) and os.path.isdir(default_directory):
-            self.directoryInput.setText(default_directory)
-            self.prepareImages(default_directory)
-
-    def initUI(self):
-        # 主布局
-        mainLayout = QVBoxLayout()
-        self.setLayout(mainLayout)
-
-        # 顶部布局：目录输入与选择按钮
-        topLayout = QHBoxLayout()
-        mainLayout.addLayout(topLayout)
-        self.directoryInput = QLineEdit()
-        self.directoryInput.setPlaceholderText("请输入或选择一个目录...")
-        topLayout.addWidget(self.directoryInput)
-        self.openButton = QPushButton("打开")
-        self.openButton.clicked.connect(self.openDirectory)
-        topLayout.addWidget(self.openButton)
-
-        # 图片显示区域
-        self.scrollArea = QScrollArea()
-        self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.verticalScrollBar().valueChanged.connect(self.scrollbarValueChanged)  # 滚动时加载可见图片
-        self.scrollArea.horizontalScrollBar().valueChanged.connect(self.scrollbarValueChanged)  # 滚动时加载可见图片
-        mainLayout.addWidget(self.scrollArea)
-
-        self.imageContainer = QWidget()
-        self.imageLayout = QGridLayout()
-        self.imageLayout.setHorizontalSpacing(self.spacing)
-        self.imageLayout.setVerticalSpacing(self.spacing)
-        self.imageLayout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.imageLayout.setContentsMargins(0, 0, 0, 0)
-        self.imageContainer.setLayout(self.imageLayout)
-        self.scrollArea.setWidget(self.imageContainer)
-
-        self.setWindowTitle('图片浏览器')
-        self.setGeometry(100, 100, 800, 600)
-        self.show()
-
-    def openDirectory(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "选择文件夹")
-        if dir_path:
-            self.directoryInput.setText(dir_path)
-            self.prepareImages(dir_path)
-
-    def prepareImages(self, dir_path):
-        logging.info(f"准备目录 {dir_path} 中的图片")
-        image_files = [f for f in os.listdir(dir_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
-        self.image_files = {f: os.path.join(dir_path, f) for f in image_files}
-        print(f"找到 {len(self.image_files)} 张图片")
-        self.displayPlaceholderImages()
-
-    def displayPlaceholderImages(self):
-        row, col = 0, 0
-        num_columns = max(1, self.scrollArea.viewport().width() // (self.image_width + self.spacing))
-        for filename in self.image_files:
-            label = QLabel()
-            label.setFixedSize(self.image_width, self.image_height)
-            label.setStyleSheet("background-color: gray")  # 灰色占位图
-            textLabel = QLabel(filename.split('.')[0])
-            textLabel.setAlignment(Qt.AlignCenter)
-            textLabel.setFixedHeight(self.label_height)
-            self.imageLayout.addWidget(label, row, col)
-            self.imageLayout.addWidget(textLabel, row + 1, col)
-            self.image_labels[filename] = label
-
-            col += 1
-            if col >= num_columns:
-                row += 2  # 为文件名标签留出空间
-                col = 0
-
-        print("图片标签准备完成")
-        self.timer.start(200)  # 启动定时器重新调整布局
-
-    def loadVisibleImages(self):
-        logging.debug("加载可见图片")
-        visible_rect = self.scrollArea.viewport().rect()
-        for filename, label in self.image_labels.items():
-            label_rect = label.geometry().translated(-self.scrollArea.horizontalScrollBar().value(), -self.scrollArea.verticalScrollBar().value())
-            visible = visible_rect.intersects(label_rect)
-            pixmap = label.pixmap()
-            loaded = pixmap is not None and not pixmap.isNull()
-            if visible and not loaded:
-                logging.debug(f"加载图片：{filename}")
-                pixmap = QPixmap(self.image_files[filename]).scaled(self.image_width, self.image_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                label.setPixmap(pixmap)
-            if not visible and loaded:
-                logging.debug(f"卸载图片：{filename}")
-                label.setPixmap(QPixmap())
-    
-    def scrollbarValueChanged(self):
-        self.timer.start(200)  # 启动定时器重新调整布局
-
-    def resizeEvent(self, event):
-        # 清除现有的图片显示以响应窗口大小变化
-        super().resizeEvent(event)
-        self.timer.start(200)  # 启动定时器重新调整布局
-
-    def handleVisibilityChange(self):
-        self.loadVisibleImages()  # 重新加载可见图片
-        self.timer.stop()
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    ex = ImageGallery("/Users/chenweichu/dev/data/test_副本/thumbnail")
-    sys.exit(app.exec_())
-
+def main(directory, image_paths):
+    """主函数，负责整个处理流程。"""
+    output_dir, mapping_file_path = prepare_directory(directory)
+    if output_dir is None:
+        return
+    mappings = process_images(image_paths, output_dir)
+    save_mappings(mapping_file_path, mappings)
 ]]]
 
 修改代码过程中严格遵守以下几条规则：

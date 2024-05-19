@@ -53,13 +53,13 @@ def rotate_image_according_to_exif(image):
             if orientation in exif:
                 if exif[orientation] == 3:
                     image = image.rotate(180, expand=True)
-                    tqdm.write("旋转图片 180 度")
+                    # tqdm.write("旋转图片 180 度")
                 elif exif[orientation] == 6:
                     image = image.rotate(270, expand=True)
-                    tqdm.write("旋转图片 270 度")
+                    # tqdm.write("旋转图片 270 度")
                 elif exif[orientation] == 8:
                     image = image.rotate(90, expand=True)
-                    tqdm.write("旋转图片 90 度")
+                    # tqdm.write("旋转图片 90 度")
     except (AttributeError, KeyError, IndexError):
         # cases: image doesn't have getexif
         pass
@@ -141,9 +141,12 @@ def resize(directory, thumbnail_size=256, grayscale=True):
     percentage = (thumbnail_size / total_size) * 100
     tqdm.write(f"缩略图总大小: {human_readable_size(thumbnail_size)}, 与原图比例: {percentage:.2f}%")
 
-# target_directory = "/Volumes/192.168.1.173-1/pic/陈都灵_503[167_MB]"
+# target_directory = "/Volumes/192.168.1.173/pic/陈都灵_503[167_MB]"
+target_directory = "/Volumes/192.168.1.173/pic/test"
+
 # target_directory = "/Volumes/192.168.1.173-1/pic/鞠婧祎_4999[5_GB]"
-target_directory = "/Users/chenweichu/dev/data/test_副本"
+# target_directory = "/Users/chenweichu/dev/data/test_副本"
+# target_directory = "/Volumes/192.168.1.173/pic/热巴_6654[53_GB]"
 
 tqdm.write("开始处理...")
 resize(target_directory, 512)
