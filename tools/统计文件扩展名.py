@@ -1,3 +1,4 @@
+import sys
 import os
 from collections import defaultdict
 from pathlib import Path
@@ -56,8 +57,16 @@ def main(directory):
     tqdm.write(f"发现的唯一扩展名数量: {len(extension_count)}")
     for ext, count in sorted(extension_count.items()):
         tqdm.write(f"扩展名 '{ext}': {count} 个文件")
+    return list(extension_count.keys())
 
-directory = "/Volumes/192.168.1.173/pic/热巴_6654[53_GB]"
-# directory = "/Users/chenweichu/dev/data/test_副本"
-
-main(directory)
+if __name__ == "__main__":
+    # sys.argv 是一个列表，包含了命令行参数
+    # main 函数调用时传入 sys.argv，这样 main 就可以接收所有命令行参数
+    directory = sys.argv[1] if len(sys.argv) > 1 else ''
+    if not directory:
+        print("请输入目录路径")
+        exit(1)
+    if not os.path.isdir(directory):
+        print("请输入有效的目录路径")
+        exit(1)
+    main(directory)

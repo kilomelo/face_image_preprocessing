@@ -1,3 +1,5 @@
+# 为文件夹里的每个文件创建大小为512的等比缩放的灰度缩略图
+import sys
 import os
 import shutil
 from pathlib import Path
@@ -65,7 +67,7 @@ def rotate_image_according_to_exif(image):
         pass
     return image
 
-def resize(directory, thumbnail_size=256, grayscale=True):
+def resize(directory, thumbnail_size=512, grayscale=True):
     """调整目录中所有图像的大小，保持宽高比不变，并转换为灰度（可选），使用基25编码重命名。"""
     image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
     successful_files = set()
@@ -141,12 +143,15 @@ def resize(directory, thumbnail_size=256, grayscale=True):
     percentage = (thumbnail_size / total_size) * 100
     tqdm.write(f"缩略图总大小: {human_readable_size(thumbnail_size)}, 与原图比例: {percentage:.2f}%")
 
-# target_directory = "/Volumes/192.168.1.173/pic/陈都灵_503[167_MB]"
-target_directory = "/Volumes/192.168.1.173/pic/test"
 
-# target_directory = "/Volumes/192.168.1.173-1/pic/鞠婧祎_4999[5_GB]"
-# target_directory = "/Users/chenweichu/dev/data/test_副本"
-# target_directory = "/Volumes/192.168.1.173/pic/热巴_6654[53_GB]"
-
-tqdm.write("开始处理...")
-resize(target_directory, 512)
+if __name__ == "__main__":
+    # sys.argv 是一个列表，包含了命令行参数
+    # main 函数调用时传入 sys.argv，这样 main 就可以接收所有命令行参数
+    directory = sys.argv[1] if len(sys.argv) > 1 else ''
+    if not directory:
+        print("请输入目录路径")
+        exit(1)
+    if not os.path.isdir(directory):
+        print("请输入有效的目录路径")
+        exit(1)
+    resize(directory)

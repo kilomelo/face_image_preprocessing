@@ -1,4 +1,5 @@
 # 迭代编号：2
+import sys
 import os
 import errno
 import stat
@@ -10,6 +11,7 @@ from insightface.app import FaceAnalysis
 from tqdm import tqdm
 from pathlib import Path
 from PIL import Image
+from custom_face_data import serialize_face
 
 def handle_remove_readonly(func, path, exc):
     """移除只读文件的异常处理函数。"""
@@ -71,7 +73,7 @@ def get_image_mapping(file_path):
             lines = file.readlines()
             for line in lines:
                 original, thumbnail = line.strip().split('*')
-                tqdm.write(f"映射: {original} -> {thumbnail}")
+                # tqdm.write(f"映射: {original} -> {thumbnail}")
                 mapping_dict[thumbnail] = original
     except Exception as e:
         tqdm.write(f"读取映射文件失败: {e}")
@@ -121,25 +123,23 @@ def process_images(thumbnail_paths, output_dir, mapping_dict, thumbnail_size=512
         for face_id, face in enumerate(faces):
             bbox = face.bbox.astype(int)
             x, y, x2, y2 = bbox
-            # tqdm.write(f"人脸坐标: {x}, {y}, {x2}, {y2}")
             w, h = x2 - x, y2 - y
-            # tqdm.write(f"人脸尺寸: {w}, {h}")
             x, y = max(0, x - int(expand_range * 0.5 * w)), max(0, y - int(expand_range * 0.5 * h))
             x2, y2 = min(thumbnail_img.shape[1], x2 + int(expand_range * 0.5 * w)), min(thumbnail_img.shape[0], y2 + int(expand_range * 0.5 * h))
-            # tqdm.write(f"调整后的人脸坐标: {x}, {y}, {x2}, {y2}")
             cropped_face_thumbnail = thumbnail_img[y:y2, x:x2]
             x, y, x2, y2 = calculate_original_coordinates(x, y, x2, y2, original_img, thumbnail_img, thumbnail_size)
-            # tqdm.write(f"坐标转换后的人脸坐标: {x}, {y}, {x2}, {y2}")
             # 确保坐标在原图范围内
             x, y, x2, y2 = max(0, x), max(0, y), min(x2, original_img.shape[1]), min(y2, original_img.shape[0])
 
             cropped_face = original_img[y:y2, x:x2]
             face_filename = decimal_to_custom_base(index * 100 + face_id) + ".jpg"
-            face_file_thumbnail = decimal_to_custom_base(index * 100 + face_id) + "_thumbnail" + ".jpg"
-            cv2.imwrite(str(output_dir / face_file_thumbnail), cropped_face_thumbnail)
-            cv2.imwrite(str(output_dir / face_filename), cropped_face)
-            with open(str(output_dir / (face_filename[:-4] + ".txt")), 'w') as f:
-                f.write(str(face))
+            # face_file_thumbnail = decimal_to_custom_base(index * 100 + face_id) + "_thumbnail" + ".jpg"
+            # cv2.imwrite(str(output_dir / face_file_thumbnail), cropped_face_thumbnail)
+            if not os.path.exists(str(output_dir / face_filename)):
+                cv2.imwrite(str(output_dir / face_filename), cropped_face)
+            serialize_face(face, str(output_dir / (face_filename[:-4] + ".pkl")))
+            # with open(str(output_dir / (face_filename[:-4] + ".txt")), 'w') as f:
+                # f.write(str(face))
             face_mappings.append(f"{original_img_path}*{face_filename}")
     return face_mappings
 
@@ -178,7 +178,17 @@ def main(image_list_file):
     mapping_dict = get_image_mapping(directory / 'mapping.txt')
     mappings = process_images(thumbnail_paths, output_dir, mapping_dict)
     save_mappings(mapping_file_path, mappings)
+    tqdm.write(f'裁切完成，人脸数量: {len(mappings)}')
+    return len(mappings)
 
-# 示例用法
-# main("/Volumes/192.168.1.173/pic/陈都灵_503[167_MB]/descriptor_2_ORBDetector_20240513161411.txt")
-main("/Volumes/192.168.1.173/pic/test/descriptor_0_HashDetector_20240519202916.txt")
+if __name__ == "__main__":
+    # sys.argv 是一个列表，包含了命令行参数
+    # main 函数调用时传入 sys.argv，这样 main 就可以接收所有命令行参数
+    filename = sys.argv[1] if len(sys.argv) > 1 else ''
+    if not filename:
+        print("请输入文件路径")
+        exit(1)
+    if not os.path.isfile(filename):
+        print("请输入有效的文件路径")
+        exit(1)
+    main(filename)
